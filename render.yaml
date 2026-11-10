@@ -4,7 +4,7 @@ services:
   - type: web
     name: millwater-pms-api
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci
     # Applies pending database migrations, then starts the API.
     startCommand: npx prisma migrate deploy && npm start
@@ -28,5 +28,5 @@ services:
 
 databases:
   - name: millwater-pms-db
-    plan: basic-256mb
+    plan: free
     databaseName: millwater_pms
