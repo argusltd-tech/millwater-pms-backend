@@ -1,0 +1,32 @@
+# Render Blueprint for the Millwater PMS API.
+# The frontend is deployed separately on Vercel (millwater-pms-frontend).
+services:
+  - type: web
+    name: millwater-pms-api
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    # Applies pending database migrations, then starts the API.
+    startCommand: npx prisma migrate deploy && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "2"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: millwater-pms-db
+          property: connectionString
+      - key: ALLOWED_ORIGINS
+        sync: false # set to your Vercel URL, e.g. https://millwater-pms.vercel.app
+      - key: MILLWATER_BOOTSTRAP_KEY
+        generateValue: true
+      # Encrypts secrets entered in Settings (AMI token). Never change it once set.
+      - key: SETTINGS_ENCRYPTION_KEY
+        generateValue: true
+
+databases:
+  - name: millwater-pms-db
+    plan: basic-256mb
+    databaseName: millwater_pms

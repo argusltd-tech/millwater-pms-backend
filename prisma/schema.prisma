@@ -1,0 +1,416 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  network_ops
+  billing_specialist
+  finance_officer
+  customer_service
+}
+
+enum UserStatus {
+  active
+  suspended
+  deleted
+}
+
+enum BillingCycleStatus {
+  open
+  closed
+}
+
+enum MeterReadingType {
+  opening
+  closing
+}
+
+enum MeterReadingStatus {
+  pending
+  confirmed
+  rejected
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  paid
+  partial
+  overdue
+}
+
+enum PaymentStatus {
+  unmatched
+  matched
+  partial
+  duplicate
+  reversed
+}
+
+enum MessageStatus {
+  queued
+  sent
+  delivered
+  failed
+}
+
+model User {
+  id              String            @id @default(cuid())
+  fullName        String
+  username        String            @unique
+  email           String            @unique
+  department      String            @default("Operations")
+  phone           String?
+  passwordHash    String
+  role            UserRole          @default(customer_service)
+  status          UserStatus        @default(active)
+  lastLoginAt     DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  sessions        Session[]
+  createdCycles   BillingCycle[]    @relation("CycleCreatedBy")
+  closedCycles    BillingCycle[]    @relation("CycleClosedBy")
+  createdReadings MeterReading[]    @relation("ReadingCreatedBy")
+  issuedInvoices  Invoice[]         @relation("InvoiceIssuedBy")
+  auditLogs       AuditLog[]
+  sentMessages    CustomerMessage[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Customer {
+  id                      String            @id @default(cuid())
+  accountNumber           String            @unique
+  enterpriseName          String
+  industrySector          String
+  contactPerson           String
+  email                   String
+  phone                   String
+  physicalAddress         String
+  feederId                String
+  transformerId           String
+  tariffScheduleId        String
+  tariff                  TariffSchedule    @relation(fields: [tariffScheduleId], references: [id], onDelete: Restrict)
+  contractedDemandKVA     Decimal           @db.Decimal(14, 3)
+  creditLimit             Decimal           @default(0) @db.Decimal(18, 2)
+  riskRating              String            @default("low")
+  communicationPreference String            @default("email")
+  onboardingDate          DateTime          @default(now()) @db.Date
+  isActive                Boolean           @default(true)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  meter                   Meter?
+  readings                MeterReading[]
+  invoices                Invoice[]
+  payments                Payment[]
+  messages                CustomerMessage[]
+
+  @@index([enterpriseName])
+  @@index([tariffScheduleId, isActive])
+}
+
+model Meter {
+  id            String         @id @default(cuid())
+  serialNumber  String         @unique
+  customerId    String         @unique
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  feederId      String
+  transformerId String
+  model         String
+  commStatus    String         @default("offline")
+  maxDemandKVA  Decimal        @default(0) @db.Decimal(14, 3)
+  powerFactor   Decimal        @default(1) @db.Decimal(5, 4)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  readings      MeterReading[]
+  invoices      Invoice[]
+
+  @@index([feederId])
+}
+
+model TariffSchedule {
+  id                        String     @id @default(cuid())
+  code                      String     @unique
+  name                      String
+  description               String
+  customerClass             String
+  peakRatePerKWh            Decimal    @db.Decimal(18, 4)
+  shoulderRatePerKWh        Decimal    @db.Decimal(18, 4)
+  offPeakRatePerKWh         Decimal    @db.Decimal(18, 4)
+  demandChargePerKVA        Decimal    @db.Decimal(18, 4)
+  serviceChargeMonthly      Decimal    @db.Decimal(18, 2)
+  minPowerFactor            Decimal    @db.Decimal(5, 4)
+  powerFactorPenaltyPerUnit Decimal    @db.Decimal(18, 2)
+  taxRatePct                Decimal    @db.Decimal(7, 4)
+  fuelAdjustmentPerKWh      Decimal    @db.Decimal(18, 4)
+  isActive                  Boolean    @default(true)
+  createdAt                 DateTime   @default(now())
+  updatedAt                 DateTime   @updatedAt
+  customers                 Customer[]
+  invoices                  Invoice[]
+}
+
+model BillingCycle {
+  id          String             @id @default(cuid())
+  periodKey   String             @unique
+  name        String
+  startDate   DateTime           @db.Date
+  endDate     DateTime           @db.Date
+  dueDate     DateTime           @db.Date
+  status      BillingCycleStatus @default(open)
+  createdById String
+  createdBy   User               @relation("CycleCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  closedById  String?
+  closedBy    User?              @relation("CycleClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  closedAt    DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  readings    MeterReading[]
+  invoices    Invoice[]
+
+  @@index([status, startDate])
+}
+
+model MeterReading {
+  id             String             @id @default(cuid())
+  customerId     String
+  customer       Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  meterId        String
+  meter          Meter              @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  billingCycleId String
+  billingCycle   BillingCycle       @relation(fields: [billingCycleId], references: [id], onDelete: Cascade)
+  reading        Decimal            @db.Decimal(20, 4)
+  readingDate    DateTime           @db.Date
+  readingType    MeterReadingType
+  status         MeterReadingStatus @default(confirmed)
+  source         String             @default("manual")
+  note           String?
+  createdById    String
+  createdBy      User               @relation("ReadingCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime           @default(now())
+
+  @@unique([meterId, billingCycleId, readingType])
+  @@index([customerId, readingDate])
+}
+
+model Invoice {
+  id                  String              @id @default(cuid())
+  invoiceNumber       String              @unique
+  customerId          String
+  customer            Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  meterId             String
+  meter               Meter               @relation(fields: [meterId], references: [id], onDelete: Restrict)
+  tariffScheduleId    String
+  tariff              TariffSchedule      @relation(fields: [tariffScheduleId], references: [id], onDelete: Restrict)
+  billingCycleId      String
+  billingCycle        BillingCycle        @relation(fields: [billingCycleId], references: [id], onDelete: Restrict)
+  billingPeriodStart  DateTime            @db.Date
+  billingPeriodEnd    DateTime            @db.Date
+  dueDate             DateTime            @db.Date
+  previousReadKWh     Decimal             @db.Decimal(20, 4)
+  currentReadKWh      Decimal             @db.Decimal(20, 4)
+  totalConsumptionKWh Decimal             @db.Decimal(20, 4)
+  peakKWh             Decimal             @db.Decimal(20, 4)
+  shoulderKWh         Decimal             @db.Decimal(20, 4)
+  offPeakKWh          Decimal             @db.Decimal(20, 4)
+  maxDemandKVA        Decimal             @db.Decimal(14, 3)
+  averagePowerFactor  Decimal             @db.Decimal(5, 4)
+  subtotal            Decimal             @db.Decimal(18, 2)
+  fuelAdjustment      Decimal             @db.Decimal(18, 2)
+  taxes               Decimal             @db.Decimal(18, 2)
+  totalAmount         Decimal             @db.Decimal(18, 2)
+  amountPaid          Decimal             @default(0) @db.Decimal(18, 2)
+  balanceDue          Decimal             @db.Decimal(18, 2)
+  status              InvoiceStatus       @default(draft)
+  issueDate           DateTime?           @db.Date
+  issuedById          String?
+  issuedBy            User?               @relation("InvoiceIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  lineItems           InvoiceLineItem[]
+  allocations         PaymentAllocation[]
+
+  @@unique([customerId, billingCycleId])
+  @@index([status, dueDate])
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal @db.Decimal(20, 4)
+  unit        String
+  rate        Decimal @db.Decimal(18, 4)
+  amount      Decimal @db.Decimal(18, 2)
+}
+
+model Payment {
+  id             String              @id @default(cuid())
+  transactionRef String              @unique
+  bankReference  String
+  paymentDate    DateTime            @db.Date
+  valueDate      DateTime            @db.Date
+  payerName      String
+  customerId     String?
+  customer       Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  amount         Decimal             @db.Decimal(18, 2)
+  channel        String
+  bankName       String
+  status         PaymentStatus       @default(unmatched)
+  notes          String?
+  duplicateOfId  String?
+  duplicateOf    Payment?            @relation("PaymentDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates     Payment[]           @relation("PaymentDuplicates")
+  reversedAt     DateTime?
+  reversalReason String?
+  createdAt      DateTime            @default(now())
+  allocations    PaymentAllocation[]
+
+  @@index([status, paymentDate])
+  @@index([bankReference])
+  @@index([customerId])
+}
+
+model PaymentAllocation {
+  id        String   @id @default(cuid())
+  paymentId String
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount    Decimal  @db.Decimal(18, 2)
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, invoiceId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String
+  details   String
+  before    Json?
+  after     Json?
+  ipAddress String
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model CustomerMessage {
+  id           String        @id @default(cuid())
+  customerId   String
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel      String
+  templateType String
+  subject      String
+  body         String
+  recipient    String
+  status       MessageStatus @default(queued)
+  statusNote   String?
+  sentById     String?
+  sentBy       User?         @relation(fields: [sentById], references: [id], onDelete: SetNull)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([customerId, createdAt])
+  @@index([status])
+}
+
+// Distribution network (MW-01). Latitude/longitude are optional until Millwater
+// supplies mapping records; the topology view does not need them.
+model Substation {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  capacityMVA  Decimal  @db.Decimal(10, 2)
+  voltageInKV  Decimal  @db.Decimal(8, 2)
+  voltageOutKV Decimal  @db.Decimal(8, 2)
+  latitude     Decimal? @db.Decimal(9, 6)
+  longitude    Decimal? @db.Decimal(9, 6)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  feeders      Feeder[]
+}
+
+model Feeder {
+  id                      String        @id @default(cuid())
+  code                    String        @unique
+  name                    String
+  substationId            String
+  substation              Substation    @relation(fields: [substationId], references: [id], onDelete: Restrict)
+  voltageKV               Decimal       @db.Decimal(8, 2)
+  ratedAmps               Decimal       @db.Decimal(10, 2)
+  overcurrentThresholdA   Decimal       @db.Decimal(10, 2)
+  minPowerFactorThreshold Decimal       @db.Decimal(5, 4)
+  latitude                Decimal?      @db.Decimal(9, 6)
+  longitude               Decimal?      @db.Decimal(9, 6)
+  isActive                Boolean       @default(true)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  transformers            Transformer[]
+
+  @@index([substationId])
+}
+
+model Transformer {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  feederId  String
+  feeder    Feeder   @relation(fields: [feederId], references: [id], onDelete: Restrict)
+  ratedKVA  Decimal  @db.Decimal(12, 2)
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([feederId])
+}
+
+// Organisation-wide settings, edited by administrators (single row, id = 1).
+model SystemSettings {
+  id                   Int      @id @default(1)
+  // Company and payment details printed on invoices
+  companyName          String   @default("")
+  companyAddress       String   @default("")
+  rcNumber             String   @default("")
+  taxId                String   @default("")
+  bankName             String   @default("")
+  bankAccountName      String   @default("")
+  bankAccountNumber    String   @default("")
+  // Billing defaults
+  vatRatePct           Decimal  @default(7.5) @db.Decimal(7, 4)
+  paymentTermsDays     Int      @default(21)
+  invoicePrefix        String   @default("INV-MW")
+  // AMI head-end connection; the token is encrypted at rest
+  amiBaseUrl           String   @default("")
+  amiTokenEncrypted    String?
+  amiAllowInsecureHttp Boolean  @default(false)
+  updatedAt            DateTime @updatedAt
+  updatedById          String?
+}
