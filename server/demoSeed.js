@@ -108,8 +108,15 @@ function behaviourFor(customer, random) {
   return roll < 0.8 ? 'prompt' : roll < 0.93 ? 'late' : roll < 0.98 ? 'partial' : 'stopped';
 }
 
+// Billing data counts as real once any reading, invoice or payment exists. An empty
+// cycle (created but never used) does not block the demo history; it is replaced.
+async function hasBillingActivity(db) {
+  const [readings, invoices, payments] = await Promise.all([db.meterReading.count(), db.invoice.count(), db.payment.count()]);
+  return readings + invoices + payments > 0;
+}
+
 export async function seedDemoActivity(prisma, { today = todayUtc() } = {}) {
-  if (await prisma.billingCycle.count() > 0) return { skipped: 'Billing data already exists; demo billing history was not added.' };
+  if (await hasBillingActivity(prisma)) return { skipped: 'Billing data already exists; demo billing history was not added.' };
   const actor = await prisma.user.findFirst({ where: { role: 'admin', status: 'active' }, orderBy: { createdAt: 'asc' } });
   if (!actor) return { skipped: 'No administrator exists yet; demo billing history will be added once the first administrator is created.' };
 
@@ -289,7 +296,8 @@ export async function seedDemoActivity(prisma, { today = todayUtc() } = {}) {
 
   await prisma.$transaction(async tx => {
     // Re-check inside the transaction so two starting instances cannot both seed.
-    if (await tx.billingCycle.count() > 0) throw Object.assign(new Error('already seeded'), { code: 'DEMO_ALREADY_SEEDED' });
+    if (await hasBillingActivity(tx)) throw Object.assign(new Error('already seeded'), { code: 'DEMO_ALREADY_SEEDED' });
+    const emptyCycles = await tx.billingCycle.deleteMany({});
     await tx.billingCycle.createMany({ data: cycles });
     await tx.meterReading.createMany({ data: readings });
     await tx.invoice.createMany({ data: invoices });
@@ -300,7 +308,7 @@ export async function seedDemoActivity(prisma, { today = todayUtc() } = {}) {
     await tx.auditLog.create({
       data: {
         userId: null, action: 'LOAD_DEMO_DATA', entity: 'billing_cycles', entityId: 'demo', ipAddress: 'system',
-        details: `Loaded demonstration billing history: ${closedPeriods.length} closed cycles (${closedPeriods.join(', ')}), ${invoices.length} invoices, ${payments.length} payments; ${openPeriod} cycle opened.`,
+        details: `${emptyCycles.count ? `Removed ${emptyCycles.count} unused billing cycle(s). ` : ''}Loaded demonstration billing history: ${closedPeriods.length} closed cycles (${closedPeriods.join(', ')}), ${invoices.length} invoices, ${payments.length} payments; ${openPeriod} cycle opened.`,
       },
     });
   }, { timeout: 120_000, maxWait: 10_000 }).catch(error => {

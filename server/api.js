@@ -143,10 +143,7 @@ api.post('/auth/bootstrap', bootstrapRateLimit, async (req, res, next) => {
     }, { isolationLevel: 'Serializable' });
 
     if (!user) return res.status(409).json({ success: false, message: 'Millwater PMS is already initialized.' });
-    // With demo data enabled, billing history needs an administrator to attribute it to.
-    if (process.env.SEED_DEMO_DATA === 'true') {
-      seedDemoActivity(prisma).then(result => console.log('Demo billing history:', result.skipped ?? 'loaded')).catch(error => console.error('Demo billing history failed:', error));
-    }
+    loadDemoHistoryOnce();
     await startSession(user, req, res);
     res.status(201).json({ success: true, data: publicUser(user) });
   } catch (error) {
@@ -156,6 +153,24 @@ api.post('/auth/bootstrap', bootstrapRateLimit, async (req, res, next) => {
     next(error);
   }
 });
+
+// With SEED_DEMO_DATA=true, billing history needs an administrator to attribute it to.
+// If none existed when the server started, try again when one is created or signs in.
+// Runs at most once per process; the seed itself skips if billing data already exists.
+let demoHistoryAttempted = false;
+function loadDemoHistoryOnce() {
+  if (process.env.SEED_DEMO_DATA !== 'true' || demoHistoryAttempted) return;
+  demoHistoryAttempted = true;
+  seedDemoActivity(prisma)
+    .then(result => {
+      if (result.skipped?.startsWith('No administrator')) demoHistoryAttempted = false;
+      console.log('Demo billing history:', result.skipped ?? 'loaded');
+    })
+    .catch(error => {
+      demoHistoryAttempted = false;
+      console.error('Demo billing history failed:', error);
+    });
+}
 
 api.post('/auth/login', authRateLimit, async (req, res, next) => {
   const identifier = typeof req.body.identifier === 'string' ? req.body.identifier.trim().slice(0, 254) : '';
@@ -177,6 +192,7 @@ api.post('/auth/login', authRateLimit, async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid username/email or password.' });
     }
     await startSession(user, req, res);
+    if (user.role === 'admin') loadDemoHistoryOnce();
     res.json({ success: true, data: publicUser(user) });
   } catch (error) {
     next(error);
