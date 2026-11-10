@@ -31,6 +31,16 @@ Use the Blueprint in `render.yaml` (**New → Blueprint**), which creates the AP
   - `ALLOWED_ORIGINS` — the frontend's Vercel URL(s), comma-separated
   - `MILLWATER_BOOTSTRAP_KEY` — random secret (32+ characters) for creating the first administrator
   - `SETTINGS_ENCRYPTION_KEY` — random secret (32+ characters) that encrypts secrets entered in Settings (e.g. the AMI token). Never change it once set.
+  - `SEED_DEMO_DATA` — `true` loads demonstration data on startup (see below); set it to `false` before entering real data.
+
+### Demonstration data
+
+With `SEED_DEMO_DATA=true` the server loads, on each start:
+
+- the sample network (4 substations, 8 feeders, 24 transformers), 3 tariffs and 200 customers — records that already exist are left alone;
+- three months of billing history — closed billing cycles with meter readings, about 600 issued invoices calculated with the Settings VAT, terms and prefix, varied payment behaviour (on time, late, partial, stopped), a few reconciliation exceptions and reminder messages — plus the current month's open cycle. This part runs only when the database has **no billing cycles at all**, so it never mixes with real billing data. If no administrator exists yet, it runs as soon as the first administrator is created.
+
+Locally, `npm run db:seed` does the same.
 
 The plans in `render.yaml` (`starter`, `basic-256mb`) are paid tiers; change them if you prefer the free tier.
 

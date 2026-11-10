@@ -9,7 +9,8 @@ import { createUserHandlers } from './users.js';
 import { createNetworkHandlers } from './network.js';
 import { createDashboardHandlers } from './dashboard.js';
 import { createAmiRouter } from './ami.js';
-import { createSettingsHandlers } from './settings.js';
+import { createSettingsHandlers, getSettings } from './settings.js';
+import { seedDemoActivity } from './demoSeed.js';
 import { prisma } from './db.js';
 
 const api = express.Router();
@@ -142,6 +143,10 @@ api.post('/auth/bootstrap', bootstrapRateLimit, async (req, res, next) => {
     }, { isolationLevel: 'Serializable' });
 
     if (!user) return res.status(409).json({ success: false, message: 'Millwater PMS is already initialized.' });
+    // With demo data enabled, billing history needs an administrator to attribute it to.
+    if (process.env.SEED_DEMO_DATA === 'true') {
+      seedDemoActivity(prisma).then(result => console.log('Demo billing history:', result.skipped ?? 'loaded')).catch(error => console.error('Demo billing history failed:', error));
+    }
     await startSession(user, req, res);
     res.status(201).json({ success: true, data: publicUser(user) });
   } catch (error) {
@@ -257,31 +262,34 @@ api.get('/tariffs', authenticate, async (req, res, next) => {
 
 api.post('/tariffs', authenticate, requireRole('admin', 'billing_specialist'), async (req, res, next) => {
   const body = req.body;
-  const numericFields = ['peakRatePerKWh', 'shoulderRatePerKWh', 'offPeakRatePerKWh', 'demandChargePerKVA', 'serviceChargeMonthly', 'minPowerFactor', 'powerFactorPenaltyPerUnit', 'taxRatePct', 'fuelAdjustmentPerKWh'];
-  if (!isText(body.code, 32) || !isText(body.name, 120) || !isText(body.description, 1000) ||
-      !isText(body.customerClass, 100) || numericFields.some(field => !isPositiveNumber(body[field], true)) ||
-      body.minPowerFactor > 1 || body.taxRatePct > 100) {
-    return res.status(400).json({ success: false, message: 'Provide valid tariff details and non-negative numeric rates.' });
+  // VAT is a system setting; a tariff's own tax rate is optional and only a fallback.
+  const numericFields = ['peakRatePerKWh', 'shoulderRatePerKWh', 'offPeakRatePerKWh', 'demandChargePerKVA', 'serviceChargeMonthly', 'minPowerFactor', 'powerFactorPenaltyPerUnit', 'fuelAdjustmentPerKWh'];
+  if (!isText(body.code, 32) || !/^[A-Za-z0-9-]+$/.test(body.code.trim()) || !isText(body.name, 120) ||
+      !isText(body.description, 1000) || !isText(body.customerClass, 100) ||
+      numericFields.some(field => !isPositiveNumber(body[field], true)) || body.minPowerFactor > 1 ||
+      (body.taxRatePct !== undefined && (!isPositiveNumber(body.taxRatePct, true) || body.taxRatePct > 100))) {
+    return res.status(400).json({ success: false, message: 'Provide a code (letters, digits, dashes), name, description, customer class and non-negative rates; minimum power factor must be between 0 and 1.' });
   }
   try {
+    const settings = await getSettings(prisma);
     const tariff = await prisma.$transaction(async tx => {
       const created = await tx.tariffSchedule.create({
-        data: Object.fromEntries([...numericFields.map(field => [field, body[field].toString()]), ...[
-          ['code', body.code.trim().toUpperCase()],
-          ['name', body.name.trim()],
-          ['description', body.description.trim()],
-          ['customerClass', body.customerClass.trim()],
-        ]]),
-      });
-      await tx.auditLog.create({
         data: {
-          userId: req.user.id,
-          action: 'CREATE',
-          entity: 'tariff_schedules',
-          entityId: created.id,
-          details: `Created tariff schedule ${created.code}.`,
-          ipAddress: req.ip || 'unknown',
+          ...Object.fromEntries(numericFields.map(field => [field, body[field].toString()])),
+          taxRatePct: String(body.taxRatePct ?? Number(settings.vatRatePct)),
+          code: body.code.trim().toUpperCase(),
+          name: body.name.trim(),
+          description: body.description.trim(),
+          customerClass: body.customerClass.trim(),
         },
+        include: { _count: { select: { customers: { where: { isActive: true } } } } },
+      });
+      await writeAudit(tx, req, {
+        action: 'CREATE',
+        entity: 'tariff_schedules',
+        entityId: created.id,
+        details: `Created tariff schedule ${created.code} (${created.name}).`,
+        after: created,
       });
       return created;
     });

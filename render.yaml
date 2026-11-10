@@ -22,6 +22,10 @@ services:
         sync: false # set to your Vercel URL, e.g. https://millwater-pms.vercel.app
       - key: MILLWATER_BOOTSTRAP_KEY
         generateValue: true
+      # Loads demonstration data (network, customers, 3 months of billing history) on startup.
+      # Set to "false" before entering real data.
+      - key: SEED_DEMO_DATA
+        value: "true"
       # Encrypts secrets entered in Settings (AMI token). Never change it once set.
       - key: SETTINGS_ENCRYPTION_KEY
         generateValue: true

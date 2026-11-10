@@ -2,6 +2,8 @@
 import 'dotenv/config';
 import express from 'express';
 import { api, amiRouter } from './server/api.js';
+import { prisma } from './server/db.js';
+import { seedDemo } from './server/demoSeed.js';
 
 const app = express();
 
@@ -36,4 +38,8 @@ app.use((error, req, res, next) => {
 const port = Number(process.env.PORT || 4000);
 app.listen(port, '0.0.0.0', () => {
   console.log(`Millwater PMS listening on port ${port}`);
+  // Demonstration data for client walkthroughs. Turn SEED_DEMO_DATA off before loading real data.
+  if (process.env.SEED_DEMO_DATA === 'true' && process.env.DATABASE_URL) {
+    seedDemo(prisma).catch(error => console.error('Demo data could not be loaded:', error));
+  }
 });
