@@ -1,4 +1,4 @@
-import { emailConfig, emailConfigProblem } from './email.js';
+import { PROVIDER_LABELS, emailConfig, emailConfigProblem } from './email.js';
 import crypto from 'node:crypto';
 import { writeAudit } from './audit.js';
 
@@ -109,6 +109,8 @@ export function adminSettings(settings) {
     encryptionReady: encryptionKey() !== null,
     emailProblem: emailConfigProblem(),
     emailFrom: emailConfig().from,
+    emailProvider: PROVIDER_LABELS[emailConfig().provider] ?? emailConfig().provider,
+    emailSandbox: emailConfig().provider === 'mailtrap',
     updatedAt: settings.updatedAt,
   };
 }

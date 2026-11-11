@@ -29,8 +29,15 @@ services:
       # Encrypts secrets entered in Settings (AMI token). Never change it once set.
       - key: SETTINGS_ENCRYPTION_KEY
         generateValue: true
-      # Onboarding emails via Resend. EMAIL_FROM must be on a domain verified in Resend,
-      # e.g. "Millwater <onboarding@millwater.ng>".
+      # Onboarding emails. "mailtrap" for demos (caught in the Mailtrap sandbox inbox, never
+      # delivered); switch to "resend" once the client's domain is verified in Resend.
+      - key: EMAIL_PROVIDER
+        value: mailtrap
+      - key: MAILTRAP_API_TOKEN
+        sync: false
+      - key: MAILTRAP_INBOX_ID
+        sync: false
+      # For Resend: EMAIL_FROM must be on the verified domain, e.g. "Millwater <onboarding@millwater.ng>".
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM

@@ -17,7 +17,7 @@ npm run dev                 # http://localhost:4000
 
 `npm test` runs the unit tests.
 
-## Onboarding emails (Resend)
+## Onboarding emails
 
 When a customer is onboarded, one or more customer service staff are chosen as their support
 contacts. The customer is then emailed a welcome letter (`server/onboardingEmail.js`, from
@@ -27,7 +27,13 @@ as reply-to. Staff can change support contacts and resend the email from the cus
 Customers are also assigned the bank account they pay into, chosen from the accounts an
 administrator adds in Settings → Bank accounts; it appears on the email and invoices.
 
-Set `RESEND_API_KEY` and `EMAIL_FROM` (a sender on a domain verified in Resend). The logo
+**Demo (now): Mailtrap sandbox.** Set `EMAIL_PROVIDER=mailtrap`, `MAILTRAP_API_TOKEN` and
+`MAILTRAP_INBOX_ID`. Every email is caught in the Mailtrap inbox (view it at mailtrap.io) and
+nothing reaches customers, so demo addresses are safe. Settings shows that demo mode is on.
+
+**Live: Resend.** Once Millwater's DNS records can be updated, verify the domain in Resend, then
+set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` and `EMAIL_FROM` (a sender on that domain) and
+redeploy. No code changes are needed. The logo
 images are served publicly from `/api/email-assets/`. The sign-off comes from Settings. Every send, and every failure with its reason, is recorded in the customer's
 messages and in the audit log. Onboarding still completes if the email cannot be sent.
 

@@ -3,7 +3,7 @@
 // flexbox, CSS variables and inline SVG), with the logo served as hosted PNG images.
 
 import { writeAudit } from './audit.js';
-import { emailAssetBaseUrl, emailConfigProblem, sendEmail } from './email.js';
+import { emailAssetBaseUrl, emailConfig, emailConfigProblem, sendEmail } from './email.js';
 import { getSettings } from './settings.js';
 
 export const WELCOME_TEMPLATE = 'welcome_onboarding';
@@ -247,7 +247,10 @@ export async function sendOnboardingEmail(prisma, req, customerId) {
         idempotencyKey: `welcome/${message.id}`,
       });
       status = 'sent';
-      note = `Sent via Resend to ${customer.email}${supportEmails.length ? `, copied to ${supportEmails.join(', ')}` : ''}.`;
+      const copied = supportEmails.length ? `, copied to ${supportEmails.join(', ')}` : '';
+      note = emailConfig().provider === 'mailtrap'
+        ? `Caught in the Mailtrap sandbox (not delivered) for ${customer.email}${copied}.`
+        : `Sent via Resend to ${customer.email}${copied}.`;
       providerMessageId = result.id;
     } catch (error) {
       note = error.message;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emailAssetBaseUrl, emailConfigProblem, sendEmail } from '../server/email.js';
+import { emailAssetBaseUrl, emailConfig, emailConfigProblem, sendEmail } from '../server/email.js';
 import { formatLetterDate, lagosToday, renderOnboardingEmail } from '../server/onboardingEmail.js';
 import { parseSupportUserIds } from '../server/customers.js';
 
@@ -72,6 +72,38 @@ test('sends through the Resend API', async () => {
   const rejecting = async () => ({ ok: false, status: 422, json: async () => ({ message: 'The from domain is not verified.' }) });
   await assert.rejects(sendEmail({ to: 'a@b.co', subject: 's', html: 'h', text: 't' }, config, rejecting), /not verified/);
   await assert.rejects(sendEmail({ to: 'a@b.co', subject: 's', html: 'h', text: 't' }, { ...config, apiKey: '' }, fakeFetch), /RESEND_API_KEY/);
+});
+
+test('chooses the email provider from the environment', () => {
+  assert.equal(emailConfig({ RESEND_API_KEY: 're_x' }).provider, 'resend');
+  assert.equal(emailConfig({ MAILTRAP_API_TOKEN: 'tok' }).provider, 'mailtrap');
+  assert.equal(emailConfig({ EMAIL_PROVIDER: 'resend', MAILTRAP_API_TOKEN: 'tok' }).provider, 'resend');
+  const mailtrap = emailConfig({ EMAIL_PROVIDER: 'Mailtrap', MAILTRAP_API_TOKEN: 'tok', MAILTRAP_INBOX_ID: '123' });
+  assert.equal(mailtrap.provider, 'mailtrap');
+  assert.match(mailtrap.from, /@/, 'a demo sender is used when EMAIL_FROM is not set');
+  assert.equal(emailConfigProblem(mailtrap), null);
+  assert.match(emailConfigProblem({ ...mailtrap, inboxId: '' }), /MAILTRAP_INBOX_ID/);
+  assert.match(emailConfigProblem({ ...mailtrap, apiKey: '' }), /MAILTRAP_API_TOKEN/);
+  assert.match(emailConfigProblem(emailConfig({ EMAIL_PROVIDER: 'smtp' })), /EMAIL_PROVIDER must be/);
+});
+
+test('sends through the Mailtrap sandbox API', async () => {
+  const config = emailConfig({ EMAIL_PROVIDER: 'mailtrap', MAILTRAP_API_TOKEN: 'tok', MAILTRAP_INBOX_ID: '4321', EMAIL_FROM: 'Millwater <hello@millwater.ng>', MAILTRAP_API_URL: 'https://mt.test/api/send/' });
+  let seen;
+  const fakeFetch = async (url, options) => {
+    seen = { url, options, body: JSON.parse(options.body) };
+    return { ok: true, status: 200, json: async () => ({ success: true, message_ids: ['mt_1'] }) };
+  };
+  const result = await sendEmail({ to: 'ops@acme.ng', cc: ['cs@millwater.ng'], replyTo: ['cs@millwater.ng', 'b@millwater.ng'], subject: 'Hi', html: '<p>Hi</p>', text: 'Hi', idempotencyKey: 'welcome/1' }, config, fakeFetch);
+  assert.deepEqual(result, { id: 'mt_1' });
+  assert.equal(seen.url, 'https://mt.test/api/send/4321');
+  assert.equal(seen.options.headers.Authorization, 'Bearer tok');
+  assert.deepEqual(seen.body.from, { name: 'Millwater', email: 'hello@millwater.ng' });
+  assert.deepEqual(seen.body.to, [{ email: 'ops@acme.ng' }]);
+  assert.deepEqual(seen.body.cc, [{ email: 'cs@millwater.ng' }]);
+  assert.equal(seen.body.headers['Reply-To'], 'cs@millwater.ng, b@millwater.ng');
+  const rejecting = async () => ({ ok: false, status: 401, json: async () => ({ success: false, errors: ['Unauthorized'] }) });
+  await assert.rejects(sendEmail({ to: 'a@b.co', subject: 's', html: 'h', text: 't' }, config, rejecting), /Unauthorized/);
 });
 
 test('validates support contact selections', () => {
