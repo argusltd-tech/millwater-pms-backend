@@ -46,54 +46,80 @@ export function renderOnboardingEmail(data) {
   const subject = `Welcome to Millwater – on-boarding for ${data.companyName}`;
   const preheader = `Your electricity supply from ${supplier} starts ${startDate}. Your support contacts and payment details are inside.`;
 
-  const cell = (content, extra = '') => `<td style="padding:10px 12px;background:${PALE};border-right:1px solid #ffffff;font-family:${FONT};font-size:13px;color:${INK};${extra}">${content}</td>`;
-  const head = label => `<th align="left" style="padding:10px 12px;background:${NAVY};color:#ffffff;border-right:1px solid #9aa6c4;font-family:${FONT};font-size:13px;font-weight:bold;">${label}</th>`;
-  const supportRows = data.supports.map(person => `<tr>${cell(e(person.fullName))}${cell(`<a href="mailto:${e(person.email)}" style="color:${INK};text-decoration:none;">${e(person.email)}</a>`, 'word-break:break-all;')}${cell(person.phone ? `<a href="tel:${e(person.phone.replace(/\s+/g, ''))}" style="color:${INK};text-decoration:none;">${e(person.phone)}</a>` : '—')}</tr>`).join('');
-  const bankCell = (value, label) => `<td class="stack" valign="middle" style="padding:15px 14px;background:${BLUE};color:#ffffff;font-family:${FONT};border:2px solid ${PALE};">
-            <div style="font-size:16px;font-weight:bold;line-height:1.3;word-break:break-word;">${e(value || '—')}</div>
-            <div style="font-size:11px;line-height:1.3;color:#dbe5ff;margin-top:3px;">${label}</div>
-          </td>`;
+  // Fluid-hybrid layout: it fits any screen width without relying on the <style> block, which
+  // several mobile mail apps ignore. The media queries only fine-tune where they are supported.
+  // Outlook for Windows ignores max-width, so it gets fixed-width "ghost" tables in [if mso] blocks.
+  const supportCards = data.supports.map(person => `
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;margin:0 0 10px;">
+              <tr>
+                <td style="padding:12px 14px;background:${PALE};border-left:4px solid ${NAVY};font-family:${FONT};font-size:14px;line-height:1.45;color:${INK};">
+                  <div style="font-weight:bold;color:${NAVY};">${e(person.fullName)}</div>
+                  <div style="word-break:break-word;overflow-wrap:anywhere;"><a href="mailto:${e(person.email)}" style="color:${BLUE};text-decoration:none;">${e(person.email)}</a></div>
+                  ${person.phone ? `<div><a href="tel:${e(person.phone.replace(/\s+/g, ''))}" style="color:${INK};text-decoration:none;">${e(person.phone)}</a></div>` : ''}
+                </td>
+              </tr>
+            </table>`).join('');
+  const bankBox = (value, label) => `<!--[if mso]><td width="190" valign="top"><![endif]-->
+              <div class="bank-col" style="display:inline-block;vertical-align:top;width:100%;max-width:190px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td class="bank-box" height="62" valign="top" style="height:62px;padding:14px 14px;background:${BLUE};border:3px solid ${PALE};color:#ffffff;font-family:${FONT};text-align:left;">
+                      <div style="font-size:16px;font-weight:bold;line-height:1.3;word-break:break-word;overflow-wrap:anywhere;">${e(value || '—')}</div>
+                      <div style="font-size:11px;line-height:1.3;color:#dbe5ff;margin-top:3px;">${label}</div>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+              <!--[if mso]></td><![endif]-->`;
 
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <title>Millwater | Customer On-boarding</title>
 <style>
-  @media only screen and (max-width: 560px) {
+  body { margin: 0 !important; padding: 0 !important; width: 100% !important; -webkit-text-size-adjust: 100%; }
+  @media only screen and (max-width: 600px) {
     .outer { padding: 0 !important; }
-    .container { width: 100% !important; }
     .pad { padding-left: 20px !important; padding-right: 20px !important; }
-    .hero-text { padding: 22px 20px !important; }
-    .hero-art { width: 120px !important; }
-    .hero-art img { width: 120px !important; height: auto !important; }
+    .hero-text { padding: 22px 0 22px 20px !important; }
     .hero-title { font-size: 22px !important; }
-    .stack { display: block !important; width: auto !important; }
-    .contacts td, .contacts th { padding: 8px 6px !important; font-size: 11px !important; }
+    .body-text { font-size: 15px !important; }
+    .bank-col { max-width: 100% !important; }
+    .bank-box { height: auto !important; }
+  }
+  @media only screen and (max-width: 420px) {
+    .hero-art { display: none !important; width: 0 !important; }
+    .hero-text { padding-right: 20px !important; }
   }
 </style>
+<!--[if mso]><style>body, table, td, div, p, a { font-family: Arial, Helvetica, sans-serif !important; }</style><![endif]-->
 </head>
 <body style="margin:0;padding:0;background:#f3f5f9;">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${e(preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f5f9;">
   <tr>
-    <td class="outer" align="center" style="padding:28px 14px;">
-      <table role="presentation" class="container" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;background:#ffffff;">
+    <td class="outer" align="center" style="padding:24px 10px;">
+      <!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;background:#ffffff;margin:0 auto;">
         <!-- Hero -->
         <tr>
           <td bgcolor="#244aab" style="background-color:#244aab;background-image:linear-gradient(155deg,#3e70ed 0%,#244aab 43%,#10204d 100%);">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td class="hero-text" valign="top" style="padding:26px 0 26px 34px;font-family:${FONT};color:#ffffff;">
-                  <img src="${assets}/millwater-logo-white.png" width="180" height="23" alt="Millwater" style="display:block;border:0;outline:none;color:#ffffff;font-size:22px;font-weight:bold;font-family:${FONT};">
-                  <div class="hero-title" style="margin:26px 0 0 0;font-size:30px;font-weight:300;line-height:1.2;letter-spacing:0.5px;color:#ffffff;white-space:nowrap;">ON-BOARDING FOR</div>
-                  <div style="margin:10px 0 12px 0;padding:4px 9px;background:#ffffff;color:#172b61;font-size:14px;font-weight:bold;border-radius:2px;display:inline-block;">${e(data.companyName)}</div>
-                  <div><span style="display:inline-block;padding:4px 13px;border-radius:20px;background:#4779f4;color:#ffffff;font-size:13px;">${e(letterDate)}</span></div>
+                <td class="hero-text" valign="top" style="padding:26px 12px 26px 30px;font-family:${FONT};color:#ffffff;">
+                  <img src="${assets}/millwater-logo-white.png" width="170" alt="Millwater" style="display:block;width:170px;max-width:100%;height:auto;border:0;outline:none;color:#ffffff;font-size:22px;font-weight:bold;font-family:${FONT};">
+                  <div class="hero-title" style="margin:22px 0 0 0;font-size:28px;font-weight:300;line-height:1.2;letter-spacing:0.5px;color:#ffffff;">ON&#8209;BOARDING FOR</div>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:10px 0 12px 0;">
+                    <tr><td style="padding:5px 9px;background:#ffffff;color:#172b61;font-family:${FONT};font-size:14px;line-height:1.3;font-weight:bold;border-radius:2px;">${e(data.companyName)}</td></tr>
+                  </table>
+                  <span style="display:inline-block;padding:4px 13px;border-radius:20px;background:#4779f4;color:#ffffff;font-size:13px;">${e(letterDate)}</span>
                 </td>
-                <td class="hero-art" valign="bottom" align="right" width="260" style="padding:0;width:260px;">
-                  <img src="${assets}/millwater-hero-mark.png" width="260" height="150" alt="" style="display:block;border:0;outline:none;">
+                <td class="hero-art" valign="bottom" align="right" width="36%" style="padding:0;width:36%;">
+                  <img src="${assets}/millwater-hero-mark.png" width="230" alt="" style="display:block;width:100%;max-width:230px;height:auto;border:0;outline:none;margin-left:auto;">
                 </td>
               </tr>
             </table>
@@ -101,7 +127,7 @@ export function renderOnboardingEmail(data) {
         </tr>
         <!-- Welcome -->
         <tr>
-          <td class="pad" style="background:${PALE};padding:34px;font-family:${FONT};font-size:14px;line-height:1.5;color:${INK};">
+          <td class="pad body-text" style="background:${PALE};padding:30px 30px;font-family:${FONT};font-size:14px;line-height:1.55;color:${INK};">
             <p style="margin:0 0 15px;"><strong>Dear ${e(data.contactName)},</strong></p>
             <p style="margin:0 0 15px;">We are delighted to welcome you as a new customer of ${e(supplier)} and to commence the supply of reliable electricity starting <strong>${e(startDate)}</strong>.</p>
             <p style="margin:0;">Your electricity supply will be provided on a post-paid basis, with each billing cycle running from the first day to the last day of the month. Joint meter readings will be conducted at the end of each billing cycle, and invoices will be issued within five business days of the following month, following the joint meter reading by both parties.</p>
@@ -109,37 +135,34 @@ export function renderOnboardingEmail(data) {
         </tr>
         <!-- Support contacts -->
         <tr>
-          <td class="pad" style="padding:34px;font-family:${FONT};font-size:14px;line-height:1.5;color:${INK};">
-            <p style="margin:0 0 12px;font-weight:bold;">For your convenience, we have designated support contacts:</p>
-            <table role="presentation" class="contacts" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
-              <tr>${head('Name')}${head('Email')}${head('Telephone')}</tr>
-              ${supportRows}
-            </table>
+          <td class="pad body-text" style="padding:30px 30px 20px;font-family:${FONT};font-size:14px;line-height:1.5;color:${INK};">
+            <p style="margin:0 0 14px;font-weight:bold;">For your convenience, we have designated support contacts:</p>${supportCards}
           </td>
         </tr>
         <!-- Payment -->
         <tr>
-          <td class="pad" align="center" style="background:${PALE};padding:24px 34px 28px;font-family:${FONT};">
-            <p style="margin:0 auto 18px;color:${NAVY};font-size:17px;font-weight:bold;line-height:1.35;">Payment is due within 5 business days of receiving invoice and should be made into:</p>
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;text-align:left;">
-              <tr>
-                ${bankCell(data.accountName || supplier, 'Company name')}
-                ${bankCell(data.bankName, 'Bank name')}
-                ${bankCell(data.accountNumber, 'Account number')}
-              </tr>
-            </table>
+          <td class="pad" align="center" style="background:${PALE};padding:24px 30px 22px;font-family:${FONT};">
+            <p style="margin:0 auto 16px;color:${NAVY};font-size:17px;font-weight:bold;line-height:1.35;">Payment is due within 5 business days of receiving invoice and should be made into:</p>
+            <div style="font-size:0;line-height:0;text-align:center;">
+              <!--[if mso]><table role="presentation" width="580" cellpadding="0" cellspacing="0" border="0"><tr><![endif]-->
+              ${bankBox(data.accountName || supplier, 'Company name')}
+              ${bankBox(data.bankName, 'Bank name')}
+              ${bankBox(data.accountNumber, 'Account number')}
+              <!--[if mso]></tr></table><![endif]-->
+            </div>
           </td>
         </tr>
         <!-- Closing -->
         <tr>
-          <td class="pad" style="padding:30px 34px 40px;font-family:${FONT};font-size:14px;line-height:1.5;color:${INK};">
-            <p style="margin:0 0 28px;">We remain committed to delivering reliable electricity and responsive support. Please do not hesitate to reach out to our team for any assistance.</p>
+          <td class="pad body-text" style="padding:30px 30px 38px;font-family:${FONT};font-size:14px;line-height:1.55;color:${INK};">
+            <p style="margin:0 0 26px;">We remain committed to delivering reliable electricity and responsive support. Please do not hesitate to reach out to our team for any assistance.</p>
             <div>Best regards,<br>For ${e(supplier)}:</div>
             <div style="font-family:'Brush Script MT','Segoe Script',cursive;font-size:30px;font-style:italic;margin:8px 0 0;line-height:1.2;">${e(data.signatoryName)}</div>
             <div style="font-weight:bold;">${e(data.signatoryTitle)}</div>
           </td>
         </tr>
       </table>
+      <!--[if mso]></td></tr></table><![endif]-->
     </td>
   </tr>
 </table>
