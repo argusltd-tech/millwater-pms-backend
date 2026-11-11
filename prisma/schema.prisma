@@ -104,6 +104,12 @@ model Customer {
   email                   String
   phone                   String
   physicalAddress         String
+  addressLine1            String            @default("")
+  addressLine2            String            @default("")
+  area                    String            @default("")
+  city                    String            @default("")
+  state                   String            @default("")
+  postCode                String            @default("")
   feederId                String
   transformerId           String
   tariffScheduleId        String

@@ -2,6 +2,7 @@ import { writeAudit } from './audit.js';
 import { buildReceivablesReport, daysPastDue, fromKobo, toKobo, todayUtc } from './ledger.js';
 import { markOverdueInvoices } from './payments.js';
 import { REVENUE_ROLES, checkNetworkAssignment } from './network.js';
+import { ADDRESS_FIELDS, formatAddress, missingAddressPart, validateAddressPart } from './address.js';
 
 const CHANNELS = ['email', 'sms', 'whatsapp', 'portal'];
 const RISK_RATINGS = ['low', 'moderate', 'high', 'critical'];
@@ -44,7 +45,7 @@ export function withBalances(customers, invoices, today = todayUtc()) {
 }
 
 // Fields each role may change on a customer record.
-const CONTACT_FIELDS = ['enterpriseName', 'industrySector', 'contactPerson', 'email', 'phone', 'physicalAddress', 'communicationPreference'];
+const CONTACT_FIELDS = ['enterpriseName', 'industrySector', 'contactPerson', 'email', 'phone', ...ADDRESS_FIELDS, 'communicationPreference'];
 const COMMERCIAL_FIELDS = ['tariffScheduleId', 'contractedDemandKVA', 'creditLimit', 'riskRating', 'isActive', 'feederId', 'transformerId'];
 const EDITABLE_BY_ROLE = {
   admin: [...CONTACT_FIELDS, ...COMMERCIAL_FIELDS],
@@ -62,6 +63,12 @@ export function validateCustomerChanges(body, role) {
   const data = {};
   for (const key of supplied) {
     const value = body[key];
+    if (ADDRESS_FIELDS.includes(key)) {
+      const part = validateAddressPart(key, value);
+      if (part.error) return { error: part.error };
+      data[key] = part.value;
+      continue;
+    }
     switch (key) {
       case 'email':
         if (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) return { error: 'Provide a valid email address.' };
@@ -115,7 +122,7 @@ export function createCustomerHandlers(prisma) {
 
   const createCustomer = async (req, res, next) => {
     const body = req.body;
-    const requiredText = ['accountNumber', 'enterpriseName', 'industrySector', 'contactPerson', 'email', 'phone', 'physicalAddress', 'feederId', 'transformerId', 'tariffScheduleId', 'meterSerialNumber', 'meterModel'];
+    const requiredText = ['accountNumber', 'enterpriseName', 'industrySector', 'contactPerson', 'email', 'phone', 'feederId', 'transformerId', 'tariffScheduleId', 'meterSerialNumber', 'meterModel'];
     if (requiredText.some(field => !isText(body[field], 254)) ||
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email) ||
         !isNonNegative(body.contractedDemandKVA) || body.contractedDemandKVA === 0 ||
@@ -125,6 +132,14 @@ export function createCustomerHandlers(prisma) {
         !CHANNELS.includes(body.communicationPreference)) {
       return res.status(400).json({ success: false, message: 'Provide valid customer, meter, demand, tariff, and contact details.' });
     }
+    const address = {};
+    for (const key of ADDRESS_FIELDS) {
+      const part = validateAddressPart(key, body[key] ?? '');
+      if (part.error) return res.status(400).json({ success: false, message: part.error });
+      address[key] = part.value;
+    }
+    const missingAddress = missingAddressPart(address);
+    if (missingAddress) return res.status(400).json({ success: false, message: missingAddress });
 
     try {
       const customer = await prisma.$transaction(async tx => {
@@ -148,7 +163,8 @@ export function createCustomerHandlers(prisma) {
             contactPerson: body.contactPerson.trim(),
             email: body.email.trim().toLowerCase(),
             phone: body.phone.trim(),
-            physicalAddress: body.physicalAddress.trim(),
+            ...address,
+            physicalAddress: formatAddress(address),
             feederId: body.feederId.trim(),
             transformerId: body.transformerId.trim(),
             tariffScheduleId: body.tariffScheduleId,
@@ -194,6 +210,12 @@ export function createCustomerHandlers(prisma) {
       const result = await prisma.$transaction(async tx => {
         const before = await tx.customer.findUnique({ where: { id: req.params.id }, include: { meter: true } });
         if (!before) return { error: { status: 404, message: 'Customer not found.' } };
+        if (ADDRESS_FIELDS.some(key => key in data)) {
+          const address = { ...before, ...data };
+          const missing = missingAddressPart(address);
+          if (missing) return { error: { status: 400, message: missing } };
+          data.physicalAddress = formatAddress(address);
+        }
         if (data.tariffScheduleId && data.tariffScheduleId !== before.tariffScheduleId) {
           const tariff = await tx.tariffSchedule.findUnique({ where: { id: data.tariffScheduleId } });
           if (!tariff || !tariff.isActive) return { error: { status: 400, message: 'Select an active tariff schedule.' } };

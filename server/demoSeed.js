@@ -3,7 +3,9 @@
 // seedReferenceData: sample network, tariffs and customers (idempotent per record).
 // seedDemoActivity:  three closed billing cycles with readings, invoices and payment
 //                    histories, plus the current month's open cycle. Runs only when the
-//                    database has no billing cycles, so it never mixes with real billing data.
+//                    database has no readings, invoices or payments, so it never mixes with
+//                    real billing data (unused empty cycles are replaced).
+import { ADDRESS_FIELDS } from './address.js';
 import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { buildInvoiceAmounts, getMonthDates } from './billing.js';
@@ -68,7 +70,18 @@ export async function seedReferenceData(prisma) {
   }
   let added = 0;
   for (const customer of data.customers) {
-    if (await prisma.customer.findUnique({ where: { accountNumber: customer.accountNumber } })) continue;
+    const existing = await prisma.customer.findUnique({ where: { accountNumber: customer.accountNumber } });
+    if (existing) {
+      // Sample accounts loaded before addresses were split keep the whole address in line 1.
+      // Fill in the parts, but only while the record is still the untouched sample.
+      if (!existing.city && existing.addressLine1 === existing.physicalAddress && existing.enterpriseName === customer.enterpriseName) {
+        await prisma.customer.update({
+          where: { id: existing.id },
+          data: Object.fromEntries(ADDRESS_FIELDS.map(key => [key, customer[key]]).concat([['physicalAddress', customer.physicalAddress]])),
+        });
+      }
+      continue;
+    }
     const { meter, onboardingDate, contractedDemandKVA, creditLimit, ...fields } = customer;
     await prisma.customer.create({
       data: {
