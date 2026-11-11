@@ -24,9 +24,11 @@ contacts. The customer is then emailed a welcome letter (`server/onboardingEmail
 Millwater's `millwater_onboarding.html` design), with the support contacts copied in and set
 as reply-to. Staff can change support contacts and resend the email from the customer profile.
 
+Customers are also assigned the bank account they pay into, chosen from the accounts an
+administrator adds in Settings → Bank accounts; it appears on the email and invoices.
+
 Set `RESEND_API_KEY` and `EMAIL_FROM` (a sender on a domain verified in Resend). The logo
-images are served publicly from `/api/email-assets/`. The bank details and sign-off come from
-Settings. Every send, and every failure with its reason, is recorded in the customer's
+images are served publicly from `/api/email-assets/`. The sign-off comes from Settings. Every send, and every failure with its reason, is recorded in the customer's
 messages and in the audit log. Onboarding still completes if the email cannot be sent.
 
 ## Deploy on Render

@@ -180,7 +180,7 @@ export function onboardingEmailProblem(customer, settings) {
   const configProblem = emailConfigProblem();
   if (configProblem) return configProblem;
   if (!customer.supportAssignments.length) return 'Assign at least one support contact first.';
-  if (!settings.bankName || !settings.bankAccountNumber) return 'Add the bank name and account number in Settings first.';
+  if (!customer.bankAccount && (!settings.bankName || !settings.bankAccountNumber)) return 'Select the bank account this customer pays into first.';
   return null;
 }
 
@@ -193,7 +193,7 @@ export async function sendOnboardingEmail(prisma, req, customerId) {
   const [customer, settings] = await Promise.all([
     prisma.customer.findUnique({
       where: { id: customerId },
-      include: { supportAssignments: { include: { user: true }, orderBy: { createdAt: 'asc' } } },
+      include: { bankAccount: true, supportAssignments: { include: { user: true }, orderBy: { createdAt: 'asc' } } },
     }),
     getSettings(prisma),
   ]);
@@ -206,9 +206,10 @@ export async function sendOnboardingEmail(prisma, req, customerId) {
     supplyStartDate: customer.onboardingDate,
     letterDate: lagosToday(),
     supports,
-    accountName: settings.bankAccountName || settings.companyName,
-    bankName: settings.bankName,
-    accountNumber: settings.bankAccountNumber,
+    // The customer's assigned account; the old single account in Settings is only a fallback.
+    accountName: customer.bankAccount?.accountName ?? (settings.bankAccountName || settings.companyName),
+    bankName: customer.bankAccount?.bankName ?? settings.bankName,
+    accountNumber: customer.bankAccount?.accountNumber ?? settings.bankAccountNumber,
     supplierName: settings.companyName,
     signatoryName: settings.emailSignatoryName,
     signatoryTitle: settings.emailSignatoryTitle,

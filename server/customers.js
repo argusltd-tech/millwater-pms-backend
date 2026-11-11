@@ -4,13 +4,14 @@ import { markOverdueInvoices } from './payments.js';
 import { REVENUE_ROLES, checkNetworkAssignment } from './network.js';
 import { ADDRESS_FIELDS, formatAddress, missingAddressPart, validateAddressPart } from './address.js';
 import { sendOnboardingEmail } from './onboardingEmail.js';
+import { checkBankAccount } from './bankAccounts.js';
 
 // Customer records are returned with their meter, tariff and designated support contacts.
 const SUPPORT_INCLUDE = {
   include: { user: { select: { id: true, fullName: true, email: true, phone: true, status: true } } },
   orderBy: { createdAt: 'asc' },
 };
-const CUSTOMER_INCLUDE = { meter: true, tariff: true, supportAssignments: SUPPORT_INCLUDE };
+const CUSTOMER_INCLUDE = { meter: true, tariff: true, bankAccount: true, supportAssignments: SUPPORT_INCLUDE };
 const MAX_SUPPORTS = 5;
 const SUPPORT_ROLE = 'customer_service';
 
@@ -84,7 +85,7 @@ export function withBalances(customers, invoices, today = todayUtc()) {
 
 // Fields each role may change on a customer record.
 const CONTACT_FIELDS = ['enterpriseName', 'industrySector', 'contactPerson', 'email', 'phone', ...ADDRESS_FIELDS, 'communicationPreference'];
-const COMMERCIAL_FIELDS = ['tariffScheduleId', 'contractedDemandKVA', 'creditLimit', 'riskRating', 'isActive', 'feederId', 'transformerId'];
+const COMMERCIAL_FIELDS = ['tariffScheduleId', 'contractedDemandKVA', 'creditLimit', 'riskRating', 'isActive', 'feederId', 'transformerId', 'bankAccountId'];
 const EDITABLE_BY_ROLE = {
   admin: [...CONTACT_FIELDS, ...COMMERCIAL_FIELDS],
   billing_specialist: [...CONTACT_FIELDS, ...COMMERCIAL_FIELDS],
@@ -197,7 +198,7 @@ export function createCustomerHandlers(prisma) {
           error.code = 'NETWORK_INVALID';
           throw error;
         }
-        const supportError = await checkSupportUsers(tx, supports.ids);
+        const supportError = await checkSupportUsers(tx, supports.ids) ?? await checkBankAccount(tx, body.bankAccountId);
         if (supportError) {
           const error = new Error(supportError);
           error.code = 'INVALID_INPUT';
@@ -215,6 +216,7 @@ export function createCustomerHandlers(prisma) {
             physicalAddress: formatAddress(address),
             ...(supplyStart.date ? { onboardingDate: supplyStart.date } : {}),
             supportAssignments: { create: supports.ids.map(userId => ({ userId })) },
+            bankAccountId: body.bankAccountId,
             feederId: body.feederId.trim(),
             transformerId: body.transformerId.trim(),
             tariffScheduleId: body.tariffScheduleId,
@@ -275,6 +277,10 @@ export function createCustomerHandlers(prisma) {
         if (data.tariffScheduleId && data.tariffScheduleId !== before.tariffScheduleId) {
           const tariff = await tx.tariffSchedule.findUnique({ where: { id: data.tariffScheduleId } });
           if (!tariff || !tariff.isActive) return { error: { status: 400, message: 'Select an active tariff schedule.' } };
+        }
+        if (data.bankAccountId && data.bankAccountId !== before.bankAccountId) {
+          const bankError = await checkBankAccount(tx, data.bankAccountId, { allowInactiveId: before.bankAccountId });
+          if (bankError) return { error: { status: 400, message: bankError } };
         }
         if (data.feederId || data.transformerId) {
           const networkError = await checkNetworkAssignment(tx, data.feederId ?? before.feederId, data.transformerId ?? before.transformerId);

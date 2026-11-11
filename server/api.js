@@ -4,6 +4,7 @@ import { createAuthHandlers, hashPassword, publicUser, requireRole, safeBootstra
 import { writeAudit } from './audit.js';
 import { createBillingHandlers } from './billing.js';
 import { createCustomerHandlers } from './customers.js';
+import { createBankAccountHandlers } from './bankAccounts.js';
 import { createPaymentHandlers } from './payments.js';
 import { createUserHandlers } from './users.js';
 import { createNetworkHandlers } from './network.js';
@@ -67,6 +68,7 @@ function toUserInput(body) {
 const billing = createBillingHandlers(prisma);
 const payments = createPaymentHandlers(prisma);
 const customers = createCustomerHandlers(prisma);
+const bankAccounts = createBankAccountHandlers(prisma);
 const users = createUserHandlers(prisma);
 const network = createNetworkHandlers(prisma);
 const dashboard = createDashboardHandlers(prisma, billing);
@@ -391,6 +393,10 @@ api.get('/network', authenticate, requireRole('admin', 'network_ops'), network.g
 api.get('/customers', authenticate, customers.listCustomers);
 api.post('/customers', authenticate, requireRole(...CUSTOMER_EDITORS), customers.createCustomer);
 api.patch('/customers/:id', authenticate, requireRole(...CUSTOMER_EDITORS), customers.updateCustomer);
+api.get('/bank-accounts', authenticate, requireRole(...CUSTOMER_EDITORS, 'finance_officer'), bankAccounts.list);
+api.post('/bank-accounts', authenticate, requireRole('admin'), bankAccounts.create);
+api.patch('/bank-accounts/:id', authenticate, requireRole('admin'), bankAccounts.update);
+api.delete('/bank-accounts/:id', authenticate, requireRole('admin'), bankAccounts.remove);
 api.get('/support-staff', authenticate, requireRole(...CUSTOMER_EDITORS), customers.listSupportStaff);
 api.put('/customers/:id/support-contacts', authenticate, requireRole(...CUSTOMER_EDITORS), customers.setSupportContacts);
 api.post('/customers/:id/welcome-email', authenticate, requireRole(...CUSTOMER_EDITORS), customers.sendWelcomeEmail);

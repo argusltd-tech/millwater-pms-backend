@@ -129,8 +129,11 @@ model Customer {
   payments                Payment[]
   messages                CustomerMessage[]
   supportAssignments      CustomerSupportAssignment[]
+  bankAccountId           String?
+  bankAccount             BankAccount?      @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
 
   @@index([enterpriseName])
+  @@index([bankAccountId])
   @@index([tariffScheduleId, isActive])
 }
 
@@ -325,6 +328,21 @@ model AuditLog {
 
   @@index([entity, entityId, createdAt])
   @@index([userId, createdAt])
+}
+
+// Bank accounts customers pay into. Each customer is assigned one at onboarding; it is shown
+// on their onboarding email and invoices. Accounts in use are deactivated rather than deleted.
+model BankAccount {
+  id            String     @id @default(cuid())
+  accountName   String
+  accountNumber String
+  bankName      String
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  customers     Customer[]
+
+  @@unique([bankName, accountNumber])
 }
 
 // Customer-service staff designated as a customer's support contacts (named in the onboarding email).
