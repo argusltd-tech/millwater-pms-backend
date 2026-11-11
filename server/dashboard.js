@@ -58,7 +58,7 @@ export function buildAttention(summary, role) {
       add('warning', 'billing', 'billing', `${billing.closedWithoutInvoices.name} is closed but has no invoices`, 'An administrator can create the missing draft invoices from Billing.');
     }
     if (billing.draftInvoices > 0) {
-      add('warning', 'billing', 'billing', `${plural(billing.draftInvoices, 'draft invoice')} awaiting issue`, `Total ${naira(billing.draftValue)}. Review them and request their release; Finance approves it.`);
+      add('warning', 'billing', 'invoices', `${plural(billing.draftInvoices, 'draft invoice')} awaiting issue`, `Total ${naira(billing.draftValue)}. Review them and request their release; Finance approves it.`);
     }
   }
 
