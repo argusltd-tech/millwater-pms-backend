@@ -17,6 +17,18 @@ npm run dev                 # http://localhost:4000
 
 `npm test` runs the unit tests.
 
+## Onboarding emails (Resend)
+
+When a customer is onboarded, one or more customer service staff are chosen as their support
+contacts. The customer is then emailed a welcome letter (`server/onboardingEmail.js`, from
+Millwater's `millwater_onboarding.html` design), with the support contacts copied in and set
+as reply-to. Staff can change support contacts and resend the email from the customer profile.
+
+Set `RESEND_API_KEY` and `EMAIL_FROM` (a sender on a domain verified in Resend). The logo
+images are served publicly from `/api/email-assets/`. The bank details and sign-off come from
+Settings. Every send, and every failure with its reason, is recorded in the customer's
+messages and in the audit log. Onboarding still completes if the email cannot be sent.
+
 ## Deploy on Render
 
 Use the Blueprint in `render.yaml` (**New → Blueprint**), which creates the API and a PostgreSQL database, or create a Web Service by hand:

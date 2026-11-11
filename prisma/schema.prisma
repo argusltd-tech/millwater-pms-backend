@@ -81,6 +81,7 @@ model User {
   issuedInvoices  Invoice[]         @relation("InvoiceIssuedBy")
   auditLogs       AuditLog[]
   sentMessages    CustomerMessage[]
+  supportedCustomers CustomerSupportAssignment[]
 }
 
 model Session {
@@ -127,6 +128,7 @@ model Customer {
   invoices                Invoice[]
   payments                Payment[]
   messages                CustomerMessage[]
+  supportAssignments      CustomerSupportAssignment[]
 
   @@index([enterpriseName])
   @@index([tariffScheduleId, isActive])
@@ -325,6 +327,18 @@ model AuditLog {
   @@index([userId, createdAt])
 }
 
+// Customer-service staff designated as a customer's support contacts (named in the onboarding email).
+model CustomerSupportAssignment {
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([customerId, userId])
+  @@index([userId])
+}
+
 model CustomerMessage {
   id           String        @id @default(cuid())
   customerId   String
@@ -336,6 +350,7 @@ model CustomerMessage {
   recipient    String
   status       MessageStatus @default(queued)
   statusNote   String?
+  providerMessageId String?
   sentById     String?
   sentBy       User?         @relation(fields: [sentById], references: [id], onDelete: SetNull)
   createdAt    DateTime      @default(now())
@@ -413,6 +428,9 @@ model SystemSettings {
   vatRatePct           Decimal  @default(7.5) @db.Decimal(7, 4)
   paymentTermsDays     Int      @default(21)
   invoicePrefix        String   @default("INV-MW")
+  // Onboarding email sign-off
+  emailSignatoryName   String   @default("H. Fash")
+  emailSignatoryTitle  String   @default("Chief Operating Officer")
   // AMI head-end connection; the token is encrypted at rest
   amiBaseUrl           String   @default("")
   amiTokenEncrypted    String?

@@ -29,6 +29,12 @@ services:
       # Encrypts secrets entered in Settings (AMI token). Never change it once set.
       - key: SETTINGS_ENCRYPTION_KEY
         generateValue: true
+      # Onboarding emails via Resend. EMAIL_FROM must be on a domain verified in Resend,
+      # e.g. "Millwater <onboarding@millwater.ng>".
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
 
 databases:
   - name: millwater-pms-db

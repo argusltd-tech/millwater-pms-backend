@@ -1,3 +1,4 @@
+import { emailConfig, emailConfigProblem } from './email.js';
 import crypto from 'node:crypto';
 import { writeAudit } from './audit.js';
 
@@ -90,6 +91,8 @@ export function publicSettings(settings) {
     vatRatePct: Number(settings.vatRatePct),
     paymentTermsDays: settings.paymentTermsDays,
     invoicePrefix: settings.invoicePrefix,
+    emailSignatoryName: settings.emailSignatoryName,
+    emailSignatoryTitle: settings.emailSignatoryTitle,
   };
 }
 
@@ -104,6 +107,8 @@ export function adminSettings(settings) {
     amiSource: connection.source,
     amiProblem: amiConfigProblem(connection),
     encryptionReady: encryptionKey() !== null,
+    emailProblem: emailConfigProblem(),
+    emailFrom: emailConfig().from,
     updatedAt: settings.updatedAt,
   };
 }
@@ -112,6 +117,7 @@ export function adminSettings(settings) {
 const TEXT_FIELDS = {
   companyName: 160, companyAddress: 400, rcNumber: 40, taxId: 40,
   bankName: 120, bankAccountName: 160, bankAccountNumber: 34,
+  emailSignatoryName: 80, emailSignatoryTitle: 80,
 };
 
 export function validateSettingsChanges(body) {

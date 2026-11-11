@@ -3,6 +3,44 @@ import { buildReceivablesReport, daysPastDue, fromKobo, toKobo, todayUtc } from 
 import { markOverdueInvoices } from './payments.js';
 import { REVENUE_ROLES, checkNetworkAssignment } from './network.js';
 import { ADDRESS_FIELDS, formatAddress, missingAddressPart, validateAddressPart } from './address.js';
+import { sendOnboardingEmail } from './onboardingEmail.js';
+
+// Customer records are returned with their meter, tariff and designated support contacts.
+const SUPPORT_INCLUDE = {
+  include: { user: { select: { id: true, fullName: true, email: true, phone: true, status: true } } },
+  orderBy: { createdAt: 'asc' },
+};
+const CUSTOMER_INCLUDE = { meter: true, tariff: true, supportAssignments: SUPPORT_INCLUDE };
+const MAX_SUPPORTS = 5;
+const SUPPORT_ROLE = 'customer_service';
+
+/** Validates a list of support user ids from a request body. Returns { ids } or { error }. */
+export function parseSupportUserIds(value) {
+  if (!Array.isArray(value) || !value.every(id => typeof id === 'string' && id.length > 0 && id.length <= 64)) {
+    return { error: 'Choose at least one support contact.' };
+  }
+  const ids = [...new Set(value)];
+  if (!ids.length) return { error: 'Choose at least one support contact.' };
+  if (ids.length > MAX_SUPPORTS) return { error: `Choose at most ${MAX_SUPPORTS} support contacts.` };
+  return { ids };
+}
+
+/** Error message unless every id is an active customer-service user. */
+async function checkSupportUsers(db, ids) {
+  const users = await db.user.findMany({ where: { id: { in: ids }, role: SUPPORT_ROLE, status: 'active' }, select: { id: true } });
+  return users.length === ids.length ? null : 'Support contacts must be active customer service staff.';
+}
+
+/** Supply start date from the request, defaulting to today. Returns { date } or { error }. */
+function parseSupplyStart(value) {
+  if (value === undefined || value === null || value === '') return { date: undefined };
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return { error: 'Supply start date must be a date (YYYY-MM-DD).' };
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) return { error: 'Supply start date is not a valid date.' };
+  const year = date.getUTCFullYear();
+  if (year < 2000 || year > 2100) return { error: 'Supply start date is out of range.' };
+  return { date };
+}
 
 const CHANNELS = ['email', 'sms', 'whatsapp', 'portal'];
 const RISK_RATINGS = ['low', 'moderate', 'high', 'critical'];
@@ -107,7 +145,7 @@ export function createCustomerHandlers(prisma) {
     try {
       await markOverdueInvoices(prisma);
       const [customers, invoices] = await Promise.all([
-        prisma.customer.findMany({ include: { meter: true, tariff: true }, orderBy: { enterpriseName: 'asc' } }),
+        prisma.customer.findMany({ include: CUSTOMER_INCLUDE, orderBy: { enterpriseName: 'asc' } }),
         prisma.invoice.findMany({ where: { status: { not: 'draft' } }, select: { customerId: true, balanceDue: true, dueDate: true, status: true } }),
       ]);
       const rows = withBalances(customers, invoices);
@@ -140,6 +178,10 @@ export function createCustomerHandlers(prisma) {
     }
     const missingAddress = missingAddressPart(address);
     if (missingAddress) return res.status(400).json({ success: false, message: missingAddress });
+    const supports = parseSupportUserIds(body.supportUserIds);
+    if (supports.error) return res.status(400).json({ success: false, message: supports.error });
+    const supplyStart = parseSupplyStart(body.onboardingDate);
+    if (supplyStart.error) return res.status(400).json({ success: false, message: supplyStart.error });
 
     try {
       const customer = await prisma.$transaction(async tx => {
@@ -155,6 +197,12 @@ export function createCustomerHandlers(prisma) {
           error.code = 'NETWORK_INVALID';
           throw error;
         }
+        const supportError = await checkSupportUsers(tx, supports.ids);
+        if (supportError) {
+          const error = new Error(supportError);
+          error.code = 'INVALID_INPUT';
+          throw error;
+        }
         const created = await tx.customer.create({
           data: {
             accountNumber: body.accountNumber.trim(),
@@ -165,6 +213,8 @@ export function createCustomerHandlers(prisma) {
             phone: body.phone.trim(),
             ...address,
             physicalAddress: formatAddress(address),
+            ...(supplyStart.date ? { onboardingDate: supplyStart.date } : {}),
+            supportAssignments: { create: supports.ids.map(userId => ({ userId })) },
             feederId: body.feederId.trim(),
             transformerId: body.transformerId.trim(),
             tariffScheduleId: body.tariffScheduleId,
@@ -182,7 +232,7 @@ export function createCustomerHandlers(prisma) {
               },
             },
           },
-          include: { meter: true, tariff: true },
+          include: CUSTOMER_INCLUDE,
         });
         await writeAudit(tx, req, {
           action: 'CREATE',
@@ -193,10 +243,16 @@ export function createCustomerHandlers(prisma) {
         });
         return created;
       });
-      res.status(201).json({ success: true, data: withBalances([customer], [])[0] });
+      // The account exists whatever happens to the email; the response says whether it went out.
+      const welcomeEmail = await sendOnboardingEmail(prisma, req, customer.id).catch(error => {
+        console.error('Onboarding email failed:', error);
+        return { status: 'failed', note: 'The onboarding email could not be prepared.' };
+      });
+      res.status(201).json({ success: true, data: withBalances([customer], [])[0], welcomeEmail });
     } catch (error) {
       if (error.code === 'TARIFF_INACTIVE') return res.status(400).json({ success: false, message: 'Select an active tariff schedule.' });
       if (error.code === 'NETWORK_INVALID') return res.status(400).json({ success: false, message: error.message });
+      if (error.code === 'INVALID_INPUT') return res.status(400).json({ success: false, message: error.message });
       if (error.code === 'P2002') return res.status(409).json({ success: false, message: 'Account number or meter serial number is already in use.' });
       next(error);
     }
@@ -224,7 +280,7 @@ export function createCustomerHandlers(prisma) {
           const networkError = await checkNetworkAssignment(tx, data.feederId ?? before.feederId, data.transformerId ?? before.transformerId);
           if (networkError) return { error: { status: 400, message: networkError } };
         }
-        const updated = await tx.customer.update({ where: { id: before.id }, data, include: { meter: true, tariff: true } });
+        const updated = await tx.customer.update({ where: { id: before.id }, data, include: CUSTOMER_INCLUDE });
         // Keep the meter's network association in step with the customer's.
         if (before.meter && (data.feederId || data.transformerId)) {
           await tx.meter.update({
@@ -254,7 +310,7 @@ export function createCustomerHandlers(prisma) {
   /** Everything recorded against one customer account, for the 360° profile. */
   const customerHistory = async (req, res, next) => {
     try {
-      const customer = await prisma.customer.findUnique({ where: { id: req.params.id }, include: { meter: true, tariff: true } });
+      const customer = await prisma.customer.findUnique({ where: { id: req.params.id }, include: CUSTOMER_INCLUDE });
       if (!customer) return res.status(404).json({ success: false, message: 'Customer not found.' });
       const paymentIds = (await prisma.payment.findMany({ where: { customerId: customer.id }, select: { id: true } })).map(item => item.id);
       const invoiceIds = (await prisma.invoice.findMany({ where: { customerId: customer.id }, select: { id: true } })).map(item => item.id);
@@ -362,7 +418,71 @@ export function createCustomerHandlers(prisma) {
     }
   };
 
-  return { listCustomers, createCustomer, updateCustomer, customerHistory, listMessages, createMessages, receivables };
+  /** Active customer service staff who can be designated as support contacts. */
+  const listSupportStaff = async (req, res, next) => {
+    try {
+      const staff = await prisma.user.findMany({
+        where: { role: SUPPORT_ROLE, status: 'active' },
+        select: { id: true, fullName: true, email: true, phone: true },
+        orderBy: { fullName: 'asc' },
+      });
+      res.json({ success: true, data: staff });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /** Replaces a customer's support contacts. */
+  const setSupportContacts = async (req, res, next) => {
+    const supports = parseSupportUserIds(req.body.userIds);
+    if (supports.error) return res.status(400).json({ success: false, message: supports.error });
+    try {
+      const result = await prisma.$transaction(async tx => {
+        const customer = await tx.customer.findUnique({ where: { id: req.params.id }, include: { supportAssignments: SUPPORT_INCLUDE } });
+        if (!customer) return { error: { status: 404, message: 'Customer not found.' } };
+        const supportError = await checkSupportUsers(tx, supports.ids);
+        if (supportError) return { error: { status: 400, message: supportError } };
+        const before = customer.supportAssignments.map(a => a.user.fullName);
+        await tx.customerSupportAssignment.deleteMany({ where: { customerId: customer.id, userId: { notIn: supports.ids } } });
+        const existing = new Set(customer.supportAssignments.map(a => a.userId));
+        const added = supports.ids.filter(id => !existing.has(id));
+        if (added.length) await tx.customerSupportAssignment.createMany({ data: added.map(userId => ({ customerId: customer.id, userId })) });
+        const updated = await tx.customer.findUnique({ where: { id: customer.id }, include: CUSTOMER_INCLUDE });
+        const after = updated.supportAssignments.map(a => a.user.fullName);
+        await writeAudit(tx, req, {
+          action: 'UPDATE',
+          entity: 'customers',
+          entityId: customer.id,
+          details: `Support contacts for ${customer.accountNumber}: ${after.join(', ')}.`,
+          before: { supportContacts: before },
+          after: { supportContacts: after },
+        });
+        return { data: updated };
+      });
+      if (result.error) return res.status(result.error.status).json({ success: false, message: result.error.message });
+      const invoices = await prisma.invoice.findMany({ where: { customerId: result.data.id, status: { not: 'draft' } } });
+      res.json({ success: true, data: withBalances([result.data], invoices)[0] });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /** Sends (or re-sends) the onboarding email to a customer. */
+  const sendWelcomeEmail = async (req, res, next) => {
+    try {
+      const exists = await prisma.customer.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!exists) return res.status(404).json({ success: false, message: 'Customer not found.' });
+      const result = await sendOnboardingEmail(prisma, req, exists.id);
+      res.status(result.status === 'sent' ? 200 : 422).json({ success: result.status === 'sent', message: result.note, data: result });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  return {
+    listCustomers, createCustomer, updateCustomer, customerHistory, listMessages, createMessages, receivables,
+    listSupportStaff, setSupportContacts, sendWelcomeEmail,
+  };
 }
 
 export { QUEUED_NOTE };

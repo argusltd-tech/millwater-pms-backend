@@ -1,6 +1,7 @@
 // Load .env before anything else reads process.env.
 import 'dotenv/config';
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 import { api, amiRouter } from './server/api.js';
 import { prisma } from './server/db.js';
 import { seedDemo } from './server/demoSeed.js';
@@ -18,6 +19,10 @@ app.use((req, res, next) => {
   next();
 });
 
+// Images used in outgoing emails (logo). Public and long-cached: mail clients fetch them directly.
+app.use('/api/email-assets', express.static(fileURLToPath(new URL('./assets/email/', import.meta.url)), {
+  maxAge: '30d', fallthrough: false, index: false, dotfiles: 'deny',
+}));
 app.use('/api/ami', amiRouter);
 app.use('/api', api);
 

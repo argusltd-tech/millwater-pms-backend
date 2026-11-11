@@ -391,6 +391,9 @@ api.get('/network', authenticate, requireRole('admin', 'network_ops'), network.g
 api.get('/customers', authenticate, customers.listCustomers);
 api.post('/customers', authenticate, requireRole(...CUSTOMER_EDITORS), customers.createCustomer);
 api.patch('/customers/:id', authenticate, requireRole(...CUSTOMER_EDITORS), customers.updateCustomer);
+api.get('/support-staff', authenticate, requireRole(...CUSTOMER_EDITORS), customers.listSupportStaff);
+api.put('/customers/:id/support-contacts', authenticate, requireRole(...CUSTOMER_EDITORS), customers.setSupportContacts);
+api.post('/customers/:id/welcome-email', authenticate, requireRole(...CUSTOMER_EDITORS), customers.sendWelcomeEmail);
 api.get('/customers/:id/history', authenticate, requireRole(...CUSTOMER_EDITORS, 'finance_officer'), customers.customerHistory);
 
 api.get('/messages', authenticate, requireRole(...MESSAGE_SENDERS), customers.listMessages);
