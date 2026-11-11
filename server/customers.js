@@ -255,7 +255,7 @@ export function createCustomerHandlers(prisma) {
       if (error.code === 'TARIFF_INACTIVE') return res.status(400).json({ success: false, message: 'Select an active tariff schedule.' });
       if (error.code === 'NETWORK_INVALID') return res.status(400).json({ success: false, message: error.message });
       if (error.code === 'INVALID_INPUT') return res.status(400).json({ success: false, message: error.message });
-      if (error.code === 'P2002') return res.status(409).json({ success: false, message: 'Account number or meter serial number is already in use.' });
+      if (error.code === 'P2002') return res.status(409).json({ success: false, message: 'That customer code or meter serial number is already in use.' });
       next(error);
     }
   };
