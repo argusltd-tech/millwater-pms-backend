@@ -58,7 +58,7 @@ export function createApprovalHandlers(prisma, billing) {
     cycle_close: {
       apply: (tx, req, approval) => billing.closeCycleCore(tx, req, approval.payload.cycleId),
       options: LONG,
-      done: result => `${result.cycle.name} is closed and ${result.created} draft invoice(s) were created. Request their release from Billing.`,
+      done: result => `${result.cycle.name} is closed and ${result.created} draft invoice(s) were created. Request their release from Invoices.`,
     },
     invoice_release: {
       apply: (tx, req, approval) => billing.releaseInvoicesCore(tx, req, approval.payload.invoiceIds),
