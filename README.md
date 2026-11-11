@@ -31,6 +31,22 @@ Set `RESEND_API_KEY` and `EMAIL_FROM` (a sender on a domain verified in Resend).
 images are served publicly from `/api/email-assets/`. The sign-off comes from Settings. Every send, and every failure with its reason, is recorded in the customer's
 messages and in the audit log. Onboarding still completes if the email cannot be sent.
 
+## Approval queues
+
+Some changes are held in the approval queue (table `ApprovalRequest`, screen **Approvals**) and take effect only once someone other than the requester approves them. Administrators can stand in for any approver.
+
+| Request | Raised by | Approved by |
+| --- | --- | --- |
+| Add, change, retire or reactivate a tariff | Admin, Billing | Finance |
+| Payment exceptions: manual match, clearing a duplicate flag, reversal | Admin, Finance, Billing | Finance |
+| Closing a billing cycle (creates the draft invoices) | Admin, Billing | Finance |
+| Releasing draft invoices to customers | Admin, Billing | Finance |
+| Meter-reading exceptions | Admin, Billing, Network Ops | Network Ops |
+
+A reading is an exception if it changes a reading already recorded, if the opening reading does not match last cycle's closing reading, or if consumption is more than 50% above or below the customer's average over the last three invoices. Until it is decided, the account is left out of billing.
+
+The API keeps the same endpoints. Requests that are queued return `202` with `pending: true`. When a request is approved, the change and the decision are saved in one transaction.
+
 ## Deploy on Render
 
 Use the Blueprint in `render.yaml` (**New → Blueprint**), which creates the API and a PostgreSQL database, or create a Web Service by hand:

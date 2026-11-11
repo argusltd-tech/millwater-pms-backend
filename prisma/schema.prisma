@@ -53,6 +53,13 @@ enum PaymentStatus {
   reversed
 }
 
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
 enum MessageStatus {
   queued
   sent
@@ -82,6 +89,8 @@ model User {
   auditLogs       AuditLog[]
   sentMessages    CustomerMessage[]
   supportedCustomers CustomerSupportAssignment[]
+  approvalRequests   ApprovalRequest[] @relation("ApprovalRequestedBy")
+  approvalDecisions  ApprovalRequest[] @relation("ApprovalDecidedBy")
 }
 
 model Session {
@@ -455,4 +464,35 @@ model SystemSettings {
   amiAllowInsecureHttp Boolean  @default(false)
   updatedAt            DateTime @updatedAt
   updatedById          String?
+}
+
+// Maker-checker queue. Tariff changes, payment exceptions, cycle close, invoice release and
+// meter-reading exceptions are held here until someone other than the requester approves them.
+// Only one pending request may exist per (entity, entityId); a partial unique index enforces it.
+model ApprovalRequest {
+  id            String         @id @default(cuid())
+  type          String
+  category      String
+  approverRole  UserRole
+  status        ApprovalStatus @default(pending)
+  entity        String
+  entityId      String
+  title         String
+  reason        String?
+  // Arguments needed to carry out the change once approved
+  payload       Json
+  // What the approver sees: { lines: [{label, before, after}], flags: [string] }
+  details       Json
+  requestedById String
+  requestedBy   User           @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedById   String?
+  decidedBy     User?          @relation("ApprovalDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status, category, createdAt])
+  @@index([entity, entityId])
+  @@index([requestedById, createdAt])
 }

@@ -15,6 +15,7 @@ const SECTION_ROLES = {
 };
 const CAN_RUN_BILLING = ['admin', 'billing_specialist'];
 const CAN_RECONCILE = ['admin', 'finance_officer'];
+const APPROVER_ROLES = ['admin', 'finance_officer', 'network_ops'];
 
 export const sectionsFor = role => Object.keys(SECTION_ROLES).filter(key => SECTION_ROLES[key].includes(role));
 
@@ -36,6 +37,12 @@ export function buildAttention(summary, role) {
   const items = [];
   const add = (severity, area, tab, title, detail) => items.push({ id: `${area}:${items.length}`, severity, area, tab, title, detail });
 
+  const approvals = summary.approvals;
+  if (approvals?.total > 0) {
+    const parts = Object.entries(approvals.byCategory).map(([key, count]) => plural(count, CATEGORY_NAMES[key] ?? key));
+    add('warning', 'approvals', 'approvals', `${plural(approvals.total, 'request')} awaiting your approval`, `${parts.join(', ')}. Nothing changes until a decision is made.`);
+  }
+
   const billing = summary.billing;
   if (billing && CAN_RUN_BILLING.includes(role)) {
     if (!billing.hasPreviousMonthCycle) {
@@ -45,13 +52,13 @@ export function buildAttention(summary, role) {
     if (open?.periodEnded && open.missing > 0) {
       add('warning', 'billing', 'billing', `${open.name}: ${plural(open.missing, 'account')} not ready`, `${open.ready} of ${open.total} accounts have valid readings. The cycle can close once all are ready.`);
     } else if (open?.periodEnded && open.total > 0) {
-      add('warning', 'billing', 'billing', `${open.name} is ready to close`, `All ${open.total} accounts have valid readings. Close it, then generate draft invoices.`);
+      add('warning', 'billing', 'billing', `${open.name} is ready to close`, `All ${open.total} accounts have valid readings. Request the close; Finance approves it and the draft invoices are created.`);
     }
     if (billing.closedWithoutInvoices) {
-      add('warning', 'billing', 'billing', `${billing.closedWithoutInvoices.name} is closed but has no invoices`, 'Generate draft invoices for the closed cycle.');
+      add('warning', 'billing', 'billing', `${billing.closedWithoutInvoices.name} is closed but has no invoices`, 'An administrator can create the missing draft invoices from Billing.');
     }
     if (billing.draftInvoices > 0) {
-      add('warning', 'billing', 'billing', `${plural(billing.draftInvoices, 'draft invoice')} awaiting issue`, `Total ${naira(billing.draftValue)}. Review and issue them to customers.`);
+      add('warning', 'billing', 'billing', `${plural(billing.draftInvoices, 'draft invoice')} awaiting issue`, `Total ${naira(billing.draftValue)}. Review them and request their release; Finance approves it.`);
     }
   }
 
@@ -110,7 +117,9 @@ export function buildAttention(summary, role) {
   return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
-export function createDashboardHandlers(prisma, billing) {
+const CATEGORY_NAMES = { tariffs: 'tariff change', payments: 'payment exception', billing: 'billing request', readings: 'meter reading' };
+
+export function createDashboardHandlers(prisma, billing, approvals) {
   const getDashboard = async (req, res, next) => {
     try {
       const role = req.user.role;
@@ -258,6 +267,7 @@ export function createDashboardHandlers(prisma, billing) {
       })());
 
       await Promise.all(tasks);
+      if (approvals && APPROVER_ROLES.includes(role)) summary.approvals = await approvals.awaitingCounts(req.user);
       summary.attention = buildAttention(summary, role);
       res.json({ success: true, data: summary });
     } catch (error) {

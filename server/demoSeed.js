@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { buildInvoiceAmounts, getMonthDates } from './billing.js';
 import { fromKobo, invoiceStatusFor, paymentStatusFor, toKobo, todayUtc } from './ledger.js';
 import { getSettings } from './settings.js';
+import { seedDemoApprovals } from './demoApprovals.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const str = value => String(value);
@@ -342,5 +343,7 @@ export async function seedDemo(prisma, log = console.log) {
   log(activity.skipped
     ? `Demo billing history: ${activity.skipped}`
     : `Demo billing history ready: cycles ${activity.closedCycles.join(', ')} closed, ${activity.openCycle} open; ${activity.invoices} invoices (${activity.overdueInvoices} overdue), ${activity.payments} payments, ${activity.messages} reminders.`);
-  return { reference, activity };
+  const approvals = await seedDemoApprovals(prisma);
+  log(approvals.skipped ? `Demo approvals: ${approvals.skipped}` : `Demo approvals raised: ${approvals.raised.join(', ') || 'none'}.`);
+  return { reference, activity, approvals };
 }

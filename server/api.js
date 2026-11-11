@@ -1,7 +1,6 @@
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { createAuthHandlers, hashPassword, publicUser, requireRole, safeBootstrapKey, verifyPassword, clearSessionCookie } from './auth.js';
-import { writeAudit } from './audit.js';
 import { createBillingHandlers } from './billing.js';
 import { createCustomerHandlers } from './customers.js';
 import { createBankAccountHandlers } from './bankAccounts.js';
@@ -10,8 +9,12 @@ import { createUserHandlers } from './users.js';
 import { createNetworkHandlers } from './network.js';
 import { createDashboardHandlers } from './dashboard.js';
 import { createAmiRouter } from './ami.js';
-import { createSettingsHandlers, getSettings } from './settings.js';
+import { createSettingsHandlers } from './settings.js';
+import { createTariffHandlers } from './tariffs.js';
+import { APPROVAL_VIEWERS, createApprovalHandlers } from './approvals.js';
+import { CATEGORIES } from './approvalStore.js';
 import { seedDemoActivity } from './demoSeed.js';
+import { seedDemoApprovals } from './demoApprovals.js';
 import { prisma } from './db.js';
 
 const api = express.Router();
@@ -41,10 +44,6 @@ function isText(value, maxLength = 200) {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= maxLength;
 }
 
-function isPositiveNumber(value, allowZero = false) {
-  return typeof value === 'number' && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0);
-}
-
 function toUserInput(body) {
   const { fullName, username, email, password, role, department, phone } = body;
   const roles = ['admin', 'network_ops', 'billing_specialist', 'finance_officer', 'customer_service'];
@@ -66,12 +65,14 @@ function toUserInput(body) {
 }
 
 const billing = createBillingHandlers(prisma);
+const tariffs = createTariffHandlers(prisma);
+const approvals = createApprovalHandlers(prisma, billing);
 const payments = createPaymentHandlers(prisma);
 const customers = createCustomerHandlers(prisma);
 const bankAccounts = createBankAccountHandlers(prisma);
 const users = createUserHandlers(prisma);
 const network = createNetworkHandlers(prisma);
-const dashboard = createDashboardHandlers(prisma, billing);
+const dashboard = createDashboardHandlers(prisma, billing, approvals);
 const { amiRouter, testAmiConnection } = createAmiRouter(prisma, { authenticate, requireRole });
 const settingsHandlers = createSettingsHandlers(prisma, { testAmiConnection });
 
@@ -167,6 +168,7 @@ function loadDemoHistoryOnce() {
     .then(result => {
       if (result.skipped?.startsWith('No administrator')) demoHistoryAttempted = false;
       console.log('Demo billing history:', result.skipped ?? 'loaded');
+      return seedDemoApprovals(prisma).then(approvals => console.log('Demo approvals:', approvals.skipped ?? approvals.raised.join(', ')));
     })
     .catch(error => {
       demoHistoryAttempted = false;
@@ -266,118 +268,31 @@ api.post('/users', authenticate, requireRole('admin'), async (req, res, next) =>
 api.patch('/users/:id', authenticate, requireRole('admin'), users.updateUser);
 api.delete('/users/:id', authenticate, requireRole('admin'), users.deleteUser);
 
-api.get('/tariffs', authenticate, async (req, res, next) => {
-  try {
-    const tariffs = await prisma.tariffSchedule.findMany({
-      include: { _count: { select: { customers: { where: { isActive: true } } } } },
-      orderBy: { code: 'asc' },
-    });
-    res.json({ success: true, data: tariffs });
-  } catch (error) {
-    next(error);
-  }
-});
+// Tariffs. Adding, changing, retiring and reactivating are queued for Finance approval.
+api.get('/tariffs', authenticate, tariffs.list);
+api.post('/tariffs', authenticate, requireRole(...CATEGORIES.tariffs.requesters), tariffs.requestCreate);
+api.patch('/tariffs/:id', authenticate, requireRole(...CATEGORIES.tariffs.requesters), tariffs.requestUpdate);
 
-api.post('/tariffs', authenticate, requireRole('admin', 'billing_specialist'), async (req, res, next) => {
-  const body = req.body;
-  // VAT is a system setting; a tariff's own tax rate is optional and only a fallback.
-  const numericFields = ['peakRatePerKWh', 'shoulderRatePerKWh', 'offPeakRatePerKWh', 'demandChargePerKVA', 'serviceChargeMonthly', 'minPowerFactor', 'powerFactorPenaltyPerUnit', 'fuelAdjustmentPerKWh'];
-  if (!isText(body.code, 32) || !/^[A-Za-z0-9-]+$/.test(body.code.trim()) || !isText(body.name, 120) ||
-      !isText(body.description, 1000) || !isText(body.customerClass, 100) ||
-      numericFields.some(field => !isPositiveNumber(body[field], true)) || body.minPowerFactor > 1 ||
-      (body.taxRatePct !== undefined && (!isPositiveNumber(body.taxRatePct, true) || body.taxRatePct > 100))) {
-    return res.status(400).json({ success: false, message: 'Provide a code (letters, digits, dashes), name, description, customer class and non-negative rates; minimum power factor must be between 0 and 1.' });
-  }
-  try {
-    const settings = await getSettings(prisma);
-    const tariff = await prisma.$transaction(async tx => {
-      const created = await tx.tariffSchedule.create({
-        data: {
-          ...Object.fromEntries(numericFields.map(field => [field, body[field].toString()])),
-          taxRatePct: String(body.taxRatePct ?? Number(settings.vatRatePct)),
-          code: body.code.trim().toUpperCase(),
-          name: body.name.trim(),
-          description: body.description.trim(),
-          customerClass: body.customerClass.trim(),
-        },
-        include: { _count: { select: { customers: { where: { isActive: true } } } } },
-      });
-      await writeAudit(tx, req, {
-        action: 'CREATE',
-        entity: 'tariff_schedules',
-        entityId: created.id,
-        details: `Created tariff schedule ${created.code} (${created.name}).`,
-        after: created,
-      });
-      return created;
-    });
-    res.status(201).json({ success: true, data: tariff });
-  } catch (error) {
-    if (error.code === 'P2002') return res.status(409).json({ success: false, message: 'Tariff code is already in use.' });
-    next(error);
-  }
-});
-
+// Billing. Readings that look wrong are held for Network Operations; closing a cycle and
+// releasing invoices are queued for Finance approval.
+const READING_VIEWERS = ['admin', 'billing_specialist', 'finance_officer', 'network_ops'];
 api.get('/billing/cycles', authenticate, billing.listCycles);
-api.post('/billing/cycles', authenticate, requireRole('admin', 'billing_specialist'), billing.createCycle);
-api.get('/billing/cycles/:id/readings', authenticate, requireRole('admin', 'billing_specialist', 'finance_officer', 'network_ops'), billing.listReadings);
-api.get('/billing/cycles/:id/readiness', authenticate, requireRole('admin', 'billing_specialist', 'finance_officer', 'network_ops'), billing.readiness);
-api.post('/billing/cycles/:id/readings', authenticate, requireRole('admin', 'billing_specialist', 'network_ops'), billing.recordReading);
-api.post('/billing/cycles/:id/close', authenticate, requireRole('admin', 'billing_specialist'), billing.closeCycle);
-api.post('/billing/cycles/:id/generate-invoices', authenticate, requireRole('admin', 'billing_specialist'), billing.generateInvoices);
+api.post('/billing/cycles', authenticate, requireRole(...CATEGORIES.billing.requesters), billing.createCycle);
+api.get('/billing/cycles/:id/readings', authenticate, requireRole(...READING_VIEWERS), billing.listReadings);
+api.get('/billing/cycles/:id/readiness', authenticate, requireRole(...READING_VIEWERS), billing.readiness);
+api.post('/billing/cycles/:id/readings', authenticate, requireRole(...CATEGORIES.readings.requesters), billing.recordReading);
+api.post('/billing/cycles/:id/close', authenticate, requireRole(...CATEGORIES.billing.requesters), billing.requestClose);
+api.post('/billing/cycles/:id/release-invoices', authenticate, requireRole(...CATEGORIES.billing.requesters), billing.requestCycleRelease);
+// Recovery only: creates drafts for a cycle closed before drafts were created on approval.
+api.post('/billing/cycles/:id/generate-invoices', authenticate, requireRole('admin'), billing.generateInvoices);
 api.get('/billing/invoices', authenticate, requireRole('admin', 'billing_specialist', 'finance_officer', 'customer_service'), billing.listInvoices);
-api.post('/billing/invoices/:id/issue', authenticate, requireRole('admin', 'billing_specialist'), billing.issueInvoice);
+api.post('/billing/invoices/:id/issue', authenticate, requireRole(...CATEGORIES.billing.requesters), billing.requestInvoiceRelease);
 
-const TARIFF_NUMERIC_FIELDS = ['peakRatePerKWh', 'shoulderRatePerKWh', 'offPeakRatePerKWh', 'demandChargePerKVA', 'serviceChargeMonthly', 'minPowerFactor', 'powerFactorPenaltyPerUnit', 'taxRatePct', 'fuelAdjustmentPerKWh'];
-
-// Rate changes apply to invoices generated afterwards; issued invoices keep their stored line items.
-api.patch('/tariffs/:id', authenticate, requireRole('admin', 'billing_specialist'), async (req, res, next) => {
-  const body = req.body;
-  const data = {};
-  for (const field of TARIFF_NUMERIC_FIELDS) {
-    if (body[field] === undefined) continue;
-    if (!isPositiveNumber(body[field], true) || (field === 'minPowerFactor' && body[field] > 1) || (field === 'taxRatePct' && body[field] > 100)) {
-      return res.status(400).json({ success: false, message: `${field} must be a valid non-negative number.` });
-    }
-    data[field] = body[field].toString();
-  }
-  for (const [field, max] of [['name', 120], ['description', 1000], ['customerClass', 100]]) {
-    if (body[field] === undefined) continue;
-    if (!isText(body[field], max)) return res.status(400).json({ success: false, message: `${field} must be non-empty text.` });
-    data[field] = body[field].trim();
-  }
-  if (body.isActive !== undefined) {
-    if (typeof body.isActive !== 'boolean') return res.status(400).json({ success: false, message: 'isActive must be true or false.' });
-    data.isActive = body.isActive;
-  }
-  if (!Object.keys(data).length) return res.status(400).json({ success: false, message: 'Provide at least one tariff field to update.' });
-
-  try {
-    const result = await prisma.$transaction(async tx => {
-      const before = await tx.tariffSchedule.findUnique({ where: { id: req.params.id } });
-      if (!before) return { error: { status: 404, message: 'Tariff schedule not found.' } };
-      if (data.isActive === false && before.isActive) {
-        const assigned = await tx.customer.count({ where: { tariffScheduleId: before.id, isActive: true } });
-        if (assigned > 0) return { error: { status: 409, message: `Reassign the ${assigned} active customer(s) on ${before.code} before deactivating it.` } };
-      }
-      const updated = await tx.tariffSchedule.update({ where: { id: before.id }, data });
-      const changed = Object.keys(data).filter(key => String(before[key]) !== String(updated[key]));
-      await writeAudit(tx, req, {
-        action: 'UPDATE',
-        entity: 'tariff_schedules',
-        entityId: updated.id,
-        details: changed.length ? `Updated tariff ${updated.code}: ${changed.join(', ')}.` : `No effective changes to tariff ${updated.code}.`,
-        before: Object.fromEntries(changed.map(key => [key, before[key]])),
-        after: Object.fromEntries(changed.map(key => [key, updated[key]])),
-      });
-      return { data: updated };
-    });
-    if (result.error) return res.status(result.error.status).json({ success: false, message: result.error.message });
-    res.json({ success: true, data: result.data });
-  } catch (error) {
-    next(error);
-  }
-});
+// Approval queue
+api.get('/approvals', authenticate, requireRole(...APPROVAL_VIEWERS), approvals.list);
+api.post('/approvals/:id/approve', authenticate, requireRole(...APPROVAL_VIEWERS), approvals.approve);
+api.post('/approvals/:id/reject', authenticate, requireRole(...APPROVAL_VIEWERS), approvals.reject);
+api.post('/approvals/:id/cancel', authenticate, requireRole(...APPROVAL_VIEWERS), approvals.cancel);
 
 const CUSTOMER_EDITORS = ['admin', 'billing_specialist', 'customer_service'];
 const MESSAGE_SENDERS = ['admin', 'billing_specialist', 'finance_officer', 'customer_service'];
@@ -410,9 +325,10 @@ api.get('/receivables', authenticate, requireRole('admin', 'finance_officer'), c
 api.get('/payments', authenticate, requireRole(...PAYMENT_VIEWERS), payments.listPayments);
 api.post('/payments', authenticate, requireRole(...PAYMENT_OFFICERS), payments.recordPayment);
 api.post('/payments/auto-reconcile', authenticate, requireRole(...PAYMENT_OFFICERS), payments.autoReconcile);
-api.post('/payments/:id/allocate', authenticate, requireRole(...PAYMENT_OFFICERS), payments.allocatePayment);
-api.post('/payments/:id/reverse', authenticate, requireRole(...PAYMENT_OFFICERS), payments.reversePayment);
-api.post('/payments/:id/release-duplicate', authenticate, requireRole(...PAYMENT_OFFICERS), payments.releaseDuplicate);
+// Payment exceptions are queued for Finance approval.
+api.post('/payments/:id/allocate', authenticate, requireRole(...CATEGORIES.payments.requesters), payments.requestAllocation);
+api.post('/payments/:id/reverse', authenticate, requireRole(...CATEGORIES.payments.requesters), payments.requestReversal);
+api.post('/payments/:id/release-duplicate', authenticate, requireRole(...CATEGORIES.payments.requesters), payments.requestDuplicateRelease);
 
 api.get('/audit-logs', authenticate, requireRole('admin'), async (req, res, next) => {
   try {
