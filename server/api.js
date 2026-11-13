@@ -11,6 +11,7 @@ import { createDashboardHandlers } from './dashboard.js';
 import { createAmiRouter } from './ami.js';
 import { createSettingsHandlers } from './settings.js';
 import { createTariffHandlers } from './tariffs.js';
+import { RELAY_OPERATORS, createMeterHandlers } from './meters.js';
 import { APPROVAL_VIEWERS, createApprovalHandlers } from './approvals.js';
 import { CATEGORIES } from './approvalStore.js';
 import { seedDemoActivity } from './demoSeed.js';
@@ -69,6 +70,7 @@ const tariffs = createTariffHandlers(prisma);
 const approvals = createApprovalHandlers(prisma, billing);
 const payments = createPaymentHandlers(prisma);
 const customers = createCustomerHandlers(prisma);
+const meters = createMeterHandlers(prisma);
 const bankAccounts = createBankAccountHandlers(prisma);
 const users = createUserHandlers(prisma);
 const network = createNetworkHandlers(prisma);
@@ -315,6 +317,7 @@ api.delete('/bank-accounts/:id', authenticate, requireRole('admin'), bankAccount
 api.get('/support-staff', authenticate, requireRole(...CUSTOMER_EDITORS), customers.listSupportStaff);
 api.put('/customers/:id/support-contacts', authenticate, requireRole(...CUSTOMER_EDITORS), customers.setSupportContacts);
 api.post('/customers/:id/welcome-email', authenticate, requireRole(...CUSTOMER_EDITORS), customers.sendWelcomeEmail);
+api.post('/meters/:id/relay', authenticate, requireRole(...RELAY_OPERATORS), meters.setRelay);
 api.get('/customers/:id/history', authenticate, requireRole(...CUSTOMER_EDITORS, 'finance_officer'), customers.customerHistory);
 
 api.get('/messages', authenticate, requireRole(...MESSAGE_SENDERS), customers.listMessages);

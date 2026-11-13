@@ -68,29 +68,30 @@ enum MessageStatus {
 }
 
 model User {
-  id              String            @id @default(cuid())
-  fullName        String
-  username        String            @unique
-  email           String            @unique
-  department      String            @default("Operations")
-  phone           String?
-  passwordHash    String
-  role            UserRole          @default(customer_service)
-  status          UserStatus        @default(active)
-  lastLoginAt     DateTime?
-  deletedAt       DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  sessions        Session[]
-  createdCycles   BillingCycle[]    @relation("CycleCreatedBy")
-  closedCycles    BillingCycle[]    @relation("CycleClosedBy")
-  createdReadings MeterReading[]    @relation("ReadingCreatedBy")
-  issuedInvoices  Invoice[]         @relation("InvoiceIssuedBy")
-  auditLogs       AuditLog[]
-  sentMessages    CustomerMessage[]
+  id                 String                      @id @default(cuid())
+  fullName           String
+  username           String                      @unique
+  email              String                      @unique
+  department         String                      @default("Operations")
+  phone              String?
+  passwordHash       String
+  role               UserRole                    @default(customer_service)
+  status             UserStatus                  @default(active)
+  lastLoginAt        DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  sessions           Session[]
+  createdCycles      BillingCycle[]              @relation("CycleCreatedBy")
+  closedCycles       BillingCycle[]              @relation("CycleClosedBy")
+  createdReadings    MeterReading[]              @relation("ReadingCreatedBy")
+  issuedInvoices     Invoice[]                   @relation("InvoiceIssuedBy")
+  auditLogs          AuditLog[]
+  sentMessages       CustomerMessage[]
   supportedCustomers CustomerSupportAssignment[]
-  approvalRequests   ApprovalRequest[] @relation("ApprovalRequestedBy")
-  approvalDecisions  ApprovalRequest[] @relation("ApprovalDecidedBy")
+  approvalRequests   ApprovalRequest[]           @relation("ApprovalRequestedBy")
+  approvalDecisions  ApprovalRequest[]           @relation("ApprovalDecidedBy")
+  relaySwitches      Meter[]                     @relation("MeterRelayChangedBy")
 }
 
 model Session {
@@ -106,32 +107,32 @@ model Session {
 }
 
 model Customer {
-  id                      String            @id @default(cuid())
-  accountNumber           String            @unique
+  id                      String                      @id @default(cuid())
+  accountNumber           String                      @unique
   enterpriseName          String
   industrySector          String
   contactPerson           String
   email                   String
   phone                   String
   physicalAddress         String
-  addressLine1            String            @default("")
-  addressLine2            String            @default("")
-  area                    String            @default("")
-  city                    String            @default("")
-  state                   String            @default("")
-  postCode                String            @default("")
+  addressLine1            String                      @default("")
+  addressLine2            String                      @default("")
+  area                    String                      @default("")
+  city                    String                      @default("")
+  state                   String                      @default("")
+  postCode                String                      @default("")
   feederId                String
   transformerId           String
   tariffScheduleId        String
-  tariff                  TariffSchedule    @relation(fields: [tariffScheduleId], references: [id], onDelete: Restrict)
-  contractedDemandKVA     Decimal           @db.Decimal(14, 3)
-  creditLimit             Decimal           @default(0) @db.Decimal(18, 2)
-  riskRating              String            @default("low")
-  communicationPreference String            @default("email")
-  onboardingDate          DateTime          @default(now()) @db.Date
-  isActive                Boolean           @default(true)
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  tariff                  TariffSchedule              @relation(fields: [tariffScheduleId], references: [id], onDelete: Restrict)
+  contractedDemandKVA     Decimal                     @db.Decimal(14, 3)
+  creditLimit             Decimal                     @default(0) @db.Decimal(18, 2)
+  riskRating              String                      @default("low")
+  communicationPreference String                      @default("email")
+  onboardingDate          DateTime                    @default(now()) @db.Date
+  isActive                Boolean                     @default(true)
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
   meter                   Meter?
   readings                MeterReading[]
   invoices                Invoice[]
@@ -139,7 +140,7 @@ model Customer {
   messages                CustomerMessage[]
   supportAssignments      CustomerSupportAssignment[]
   bankAccountId           String?
-  bankAccount             BankAccount?      @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  bankAccount             BankAccount?                @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
 
   @@index([enterpriseName])
   @@index([bankAccountId])
@@ -147,21 +148,27 @@ model Customer {
 }
 
 model Meter {
-  id            String         @id @default(cuid())
-  serialNumber  String         @unique
-  customerId    String         @unique
-  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  feederId      String
-  transformerId String
-  model         String
-  commStatus    String         @default("offline")
-  maxDemandKVA  Decimal        @default(0) @db.Decimal(14, 3)
-  powerFactor   Decimal        @default(1) @db.Decimal(5, 4)
-  isActive      Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  readings      MeterReading[]
-  invoices      Invoice[]
+  id               String         @id @default(cuid())
+  serialNumber     String         @unique
+  customerId       String         @unique
+  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  feederId         String
+  transformerId    String
+  model            String
+  commStatus       String         @default("offline")
+  maxDemandKVA     Decimal        @default(0) @db.Decimal(14, 3)
+  powerFactor      Decimal        @default(1) @db.Decimal(5, 4)
+  isActive         Boolean        @default(true)
+  // Supply relay, switched remotely: "connected" or "disconnected".
+  relayState       String         @default("connected")
+  relayReason      String?
+  relayChangedAt   DateTime?
+  relayChangedById String?
+  relayChangedBy   User?          @relation("MeterRelayChangedBy", fields: [relayChangedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  readings         MeterReading[]
+  invoices         Invoice[]
 
   @@index([feederId])
 }
@@ -367,21 +374,21 @@ model CustomerSupportAssignment {
 }
 
 model CustomerMessage {
-  id           String        @id @default(cuid())
-  customerId   String
-  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  channel      String
-  templateType String
-  subject      String
-  body         String
-  recipient    String
-  status       MessageStatus @default(queued)
-  statusNote   String?
+  id                String        @id @default(cuid())
+  customerId        String
+  customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel           String
+  templateType      String
+  subject           String
+  body              String
+  recipient         String
+  status            MessageStatus @default(queued)
+  statusNote        String?
   providerMessageId String?
-  sentById     String?
-  sentBy       User?         @relation(fields: [sentById], references: [id], onDelete: SetNull)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  sentById          String?
+  sentBy            User?         @relation(fields: [sentById], references: [id], onDelete: SetNull)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   @@index([customerId, createdAt])
   @@index([status])

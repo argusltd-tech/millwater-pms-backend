@@ -11,7 +11,7 @@ const SUPPORT_INCLUDE = {
   include: { user: { select: { id: true, fullName: true, email: true, phone: true, status: true } } },
   orderBy: { createdAt: 'asc' },
 };
-const CUSTOMER_INCLUDE = { meter: true, tariff: true, bankAccount: true, supportAssignments: SUPPORT_INCLUDE };
+const CUSTOMER_INCLUDE = { meter: { include: { relayChangedBy: { select: { fullName: true } } } }, tariff: true, bankAccount: true, supportAssignments: SUPPORT_INCLUDE };
 const MAX_SUPPORTS = 5;
 const SUPPORT_ROLE = 'customer_service';
 
