@@ -167,7 +167,7 @@ export async function allocatePaymentCore(tx, req, paymentId, { invoiceId, custo
 export async function reversePaymentCore(tx, req, paymentId, reason, today = todayUtc()) {
   const payment = await tx.payment.findUnique({ where: { id: paymentId }, include: { allocations: true } });
   if (!payment) return { error: { status: 404, message: 'Payment not found.' } };
-  if (payment.status === 'reversed') return { error: { status: 409, message: 'Payment is already reversed.' } };
+  if (payment.status === 'reversed') return { error: { status: 409, message: 'Payment is already voided.' } };
 
   const touched = [];
   for (const allocation of payment.allocations) {
@@ -190,10 +190,10 @@ export async function reversePaymentCore(tx, req, paymentId, reason, today = tod
     include: paymentInclude,
   });
   await writeAudit(tx, req, {
-    action: 'REVERSE',
+    action: 'VOID',
     entity: 'payments',
     entityId: payment.id,
-    details: `Reversed ${payment.transactionRef}${touched.length ? ` and restored balances on ${touched.map(item => item.invoiceNumber).join(', ')}` : ''}. Reason: ${reason}`,
+    details: `Voided ${payment.transactionRef}${touched.length ? ` and restored balances on ${touched.map(item => item.invoiceNumber).join(', ')}` : ''}. Reason: ${reason}`,
     before: payment,
     after: updated,
   });
@@ -418,22 +418,22 @@ export function createPaymentHandlers(prisma) {
   };
 
   const requestReversal = (req, res, next) => {
-    const { data: reason, error } = validateReason(req.body.reason, 'Provide a reversal reason');
+    const { data: reason, error } = validateReason(req.body.reason, 'Provide a reason for voiding the payment');
     if (error) return res.status(400).json({ success: false, message: error });
     return queue(req, res, next, {
       type: 'payment_reverse',
-      title: payment => `Reverse ${payment.transactionRef} (${naira(payment.amount)})`,
+      title: payment => `Void ${payment.transactionRef} (${naira(payment.amount)})`,
       reason,
       payload: { reason },
       check: tx => reversePaymentCore(tx, req, req.params.id, reason),
       describe: (payment, result) => ({
         lines: [
-          { label: 'Payment status', before: payment.status, after: 'reversed' },
+          { label: 'Payment status', before: payment.status, after: 'voided' },
           ...(result.invoices.length ? [{ label: 'Balances restored on', after: result.invoices.map(inv => inv.invoiceNumber).join(', ') }] : []),
         ],
-        flags: ['A reversal cannot be undone.', ...(result.invoices.length ? [`${result.invoices.length} invoice balance(s) go back up.`] : [])],
+        flags: ['Voiding a payment cannot be undone.', ...(result.invoices.length ? [`${result.invoices.length} invoice balance(s) go back up.`] : [])],
       }),
-      message: payment => `Reversal of ${payment.transactionRef} sent to Finance for approval.`,
+      message: payment => `Request to void ${payment.transactionRef} sent to Finance for approval.`,
     });
   };
 

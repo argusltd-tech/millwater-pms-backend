@@ -80,7 +80,7 @@ export function buildAttention(summary, role) {
       add('warning', 'payments', 'payments', `${plural(payments.unmatched, 'payment')} not matched to a customer`, `${naira(payments.unallocatedAmount)} received but not yet allocated. Run auto-reconcile or match manually.`);
     }
     if (payments.duplicate > 0) {
-      add('warning', 'payments', 'payments', `${plural(payments.duplicate, 'possible duplicate payment')} to review`, 'Confirm with the bank, then release or reverse.');
+      add('warning', 'payments', 'payments', `${plural(payments.duplicate, 'possible duplicate payment')} to review`, 'Confirm with the bank, then release or void.');
     }
   }
 

@@ -48,7 +48,7 @@ export function createApprovalHandlers(prisma, billing) {
     payment_reverse: {
       apply: (tx, req, approval) => reversePaymentCore(tx, req, approval.payload.paymentId, approval.payload.reason),
       options: SERIALIZABLE,
-      done: result => `${result.payment.transactionRef} reversed${result.invoices.length ? `; balances restored on ${result.invoices.length} invoice(s)` : ''}.`,
+      done: result => `${result.payment.transactionRef} voided${result.invoices.length ? `; balances restored on ${result.invoices.length} invoice(s)` : ''}.`,
     },
     payment_release_duplicate: {
       apply: (tx, req, approval) => releaseDuplicateCore(tx, req, approval.payload.paymentId, approval.payload.note),
